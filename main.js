@@ -25,9 +25,32 @@ controls.update();
 // 4. Load the Model
 const loader = new GLTFLoader();
 loader.load('./models/TeRaki-05.glb', (gltf) => {
-    scene.add(gltf.scene);
+    const model = gltf.scene;
+    scene.add(model);
+
+    // --- DIAGNOSTIC LOGIC ---
+    const box = new THREE.Box3().setFromObject(model);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+
+    // Move the camera to fit the model in view
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fov = camera.fov * (Math.PI / 180);
+    let cameraZ = Math.abs(maxDim / 4 * Math.tan(fov * 2));
+    
+    cameraZ *= 3; // Zoom out a bit more
+    camera.position.z = cameraZ;
+    camera.lookAt(center);
+    
+    if (controls) {
+        controls.target.copy(center);
+        controls.update();
+    }
+    // ------------------------
+
+    console.log("Model loaded! Dimensions:", size);
 }, undefined, (error) => {
-    console.error("The model failed to load:", error);
+    console.error(error);
 });
 
 // 5. Animation Loop
