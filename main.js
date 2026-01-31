@@ -45,7 +45,7 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
 
     // Optional: Force it to a visible size if it's too small/big
     // model.scale.set(1, 1, 1); 
- undefined, (error) => {
+}, undefined, (error) => {
     console.error("Loader error:", error);
 });
 
