@@ -25,17 +25,23 @@ controls.update();
 // 4. Load the Model
 const loader = new GLTFLoader();
 loader.load('./models/TeRaki-05.glb', (gltf) => {
-    const model = gltf.scene;
-    scene.add(model);
+    scene.add(gltf.scene);
 
-    // This will tell us the exact size in the browser console (F12)
-    const box = new THREE.Box3().setFromObject(model);
-    const size = new THREE.Vector3();
-    box.getSize(size);
+    // Find the camera named "Camera" (or whatever you named it in Blender)
+    const blenderCamera = gltf.cameras[0]; 
     
-    console.log("Model Size X:", size.x);
-    console.log("Model Size Y:", size.y);
-    console.log("Model Size Z:", size.z);
+    if (blenderCamera) {
+        // Option 1: Just copy the position/rotation to your current camera
+        camera.position.copy(blenderCamera.position);
+        camera.quaternion.copy(blenderCamera.quaternion);
+        
+        // Option 2: Replace your camera with the Blender one entirely
+        // activeCamera = blenderCamera; 
+    }
+    
+    // Update controls to look at the new position
+    controls.update();
+});
 
     // Optional: Force it to a visible size if it's too small/big
     // model.scale.set(1, 1, 1); 
