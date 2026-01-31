@@ -22,8 +22,9 @@
 /* L22 */ // --- 3. CONTROLS ---
 /* L23 */ const controls = new OrbitControls(camera, renderer.domElement);
 /* L24 */ controls.enableDamping = true; 
-/* L25 */ camera.position.set(0, 5, 15); 
-/* L26 */ controls.update();
+/* L25 */ camera.position.set(-11, 10, -7); 
+/* L26 */ controls.target.set(-3, 0, 4);
+/* L26b*/ controls.update();
 /* L27 */ 
 /* L28 */ // --- 4. LOAD MODEL ---
 /* L29 */ const loader = new GLTFLoader();
