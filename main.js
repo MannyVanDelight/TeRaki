@@ -24,7 +24,7 @@ controls.update();
 
 // 4. Load the Model
 const loader = new GLTFLoader();
-loader.load('https://github.com/MannyVanDelight/TeRaki/blob/main/models/TeRaki-05.glb', (gltf) => {
+loader.load('https://raw.githubusercontent.com/MannyVanDelight/TeRaki/main/models/TeRaki-05.glb', (gltf) => {
     scene.add(gltf.scene);
 }, undefined, (error) => {
     console.error(error);
