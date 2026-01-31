@@ -10,12 +10,16 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 // 2. Add Lighting (Crucial or your model will be black)
-const light = new THREE.AmbientLight(0xffffff, 1); // Soft white light
-scene.add(light);
+scene.background = new THREE.Color(0x808080); // Makes the background grey
+const ambientLight = new THREE.AmbientLight(0xffffff, 1); 
+scene.add(ambientLight);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+directionalLight.position.set(10, 10, 10);
+scene.add(directionalLight);
 
 // 3. Add Interaction (Pivot/Zoom)
 const controls = new OrbitControls(camera, renderer.domElement);
-camera.position.set(0, 2, 5);
+camera.position.set(0, 5, 15);
 controls.update();
 
 // 4. Load the Model
