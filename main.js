@@ -23,6 +23,11 @@ camera.position.set(0, 5, 15);
 controls.update();
 
 // 4. Load the Model
+const testBox = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshStandardMaterial({ color: 0xff0000 })
+);
+scene.add(testBox);
 const loader = new GLTFLoader();
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     const model = gltf.scene;
