@@ -24,10 +24,10 @@ controls.update();
 
 // 4. Load the Model
 const loader = new GLTFLoader();
-loader.load('https://raw.githubusercontent.com/MannyVanDelight/TeRaki/main/models/TeRaki-05.glb', (gltf) => {
+loader.load('./models/TeRaki-05.glb', (gltf) => {
     scene.add(gltf.scene);
 }, undefined, (error) => {
-    console.error(error);
+    console.error("The model failed to load:", error);
 });
 
 // 5. Animation Loop
