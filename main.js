@@ -42,6 +42,14 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
     // Update controls to look at the new position
     controls.update();
 });
+// This will print the numbers every 2 seconds so you can just copy them
+setInterval(() => {
+    if (camera && controls) {
+        console.log("--- COPY THESE NUMBERS ---");
+        console.log("Camera Pos:", camera.position.x, camera.position.y, camera.position.z);
+        console.log("Target Pos:", controls.target.x, controls.target.y, controls.target.z);
+    }
+}, 2000);
 
     // Optional: Force it to a visible size if it's too small/big
     // model.scale.set(1, 1, 1); 
