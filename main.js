@@ -23,39 +23,24 @@ camera.position.set(0, 5, 15);
 controls.update();
 
 // 4. Load the Model
-const testBox = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardMaterial({ color: 0xff0000 })
-);
-scene.add(testBox);
 const loader = new GLTFLoader();
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     const model = gltf.scene;
     scene.add(model);
 
-    // --- DIAGNOSTIC LOGIC ---
+    // This will tell us the exact size in the browser console (F12)
     const box = new THREE.Box3().setFromObject(model);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-
-    // Move the camera to fit the model in view
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fov = camera.fov * (Math.PI / 180);
-    let cameraZ = Math.abs(maxDim / 4 * Math.tan(fov * 2));
+    const size = new THREE.Vector3();
+    box.getSize(size);
     
-    cameraZ *= 3; // Zoom out a bit more
-    camera.position.z = cameraZ;
-    camera.lookAt(center);
-    
-    if (controls) {
-        controls.target.copy(center);
-        controls.update();
-    }
-    // ------------------------
+    console.log("Model Size X:", size.x);
+    console.log("Model Size Y:", size.y);
+    console.log("Model Size Z:", size.z);
 
-    console.log("Model loaded! Dimensions:", size);
+    // Optional: Force it to a visible size if it's too small/big
+    // model.scale.set(1, 1, 1); 
 }, undefined, (error) => {
-    console.error(error);
+    console.error("Loader error:", error);
 });
 
 // 5. Animation Loop
