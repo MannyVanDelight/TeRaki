@@ -56,13 +56,13 @@
 /* L51 */ animate();
 /* L52 */ 
 /* L53 */ // --- 6. COORDINATE FINDER ---
-//* L54 */ setInterval(() => {
-//* L55 */     if (camera && controls) {
-//* L56 */         console.log("--- VIEW DATA ---");
-//* L57 */         console.log("Cam:", camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
-//* L58 */         console.log("Tar:", controls.target.x.toFixed(2), controls.target.y.toFixed(2), controls.target.z.toFixed(2));
-//* L59 */     }
-//* L60 */ }, 2000);
+/* L54 */ setInterval(() => {
+/* L55 */     if (camera && controls) {
+/* L56 */         console.log("--- VIEW DATA ---");
+/* L57 */         console.log("Cam:", camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
+/* L58 */         console.log("Tar:", controls.target.x.toFixed(2), controls.target.y.toFixed(2), controls.target.z.toFixed(2));
+/* L59 */     }
+/* L60 */ }, 2000);
 /* L61 */ 
 /* L62 */ // Window Resize Handler
 /* L63 */ window.addEventListener('resize', () => {
