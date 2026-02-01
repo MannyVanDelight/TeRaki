@@ -26,22 +26,26 @@
 /* L26 */ controls.target.set(0, 0, 0);
 /* L26b*/ controls.update();
 /* L27 */ 
-/* L28 */ // --- 4. LOAD MODEL ---
+/* L28 */ // --- 4. LOAD MODEL WITH DRACO ---
 /* L29 */ const loader = new GLTFLoader();
-/* L30 */ loader.load(
-/* L31 */     './models/TeRaki-05.glb',
-/* L32 */     (gltf) => {
-/* L33 */         scene.add(gltf.scene);
-/* L34 */         console.log("Model Loaded Successfully!");
-/* L35 */         
-/* L36 */         // This updates the controls once the model is added
-/* L37 */         controls.update();
-/* L38 */     },
-/* L39 */     undefined,
-/* L40 */     (error) => {
-/* L41 */         console.error("Loader error at L41:", error);
-/* L42 */     }
-/* L43 */ ); 
+/* L30 */ 
+/* L31 */ // Point to the "unzipping" tools hosted by Google
+/* L32 */ const dracoLoader = new DRACOLoader();
+/* L33 */ dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+/* L34 */ loader.setDRACOLoader(dracoLoader);
+/* L35 */ 
+/* L36 */ loader.load(
+/* L37 */     './models/TeRaki-05.glb', 
+/* L38 */     (gltf) => {
+/* L39 */         scene.add(gltf.scene);
+/* L40 */         console.log("Compressed Model Loaded!");
+/* L41 */         controls.update();
+/* L42 */     },
+/* L43 */     undefined,
+/* L44 */     (error) => {
+/* L45 */         console.error("Loader error:", error);
+/* L46 */     }
+/* L47 */ );
 /* L44 */ 
 /* L45 */ // --- 5. ANIMATION LOOP ---
 /* L46 */ function animate() {
@@ -52,13 +56,13 @@
 /* L51 */ animate();
 /* L52 */ 
 /* L53 */ // --- 6. COORDINATE FINDER ---
-/* L54 */ setInterval(() => {
-/* L55 */     if (camera && controls) {
-/* L56 */         console.log("--- VIEW DATA ---");
-/* L57 */         console.log("Cam:", camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
-/* L58 */         console.log("Tar:", controls.target.x.toFixed(2), controls.target.y.toFixed(2), controls.target.z.toFixed(2));
-/* L59 */     }
-/* L60 */ }, 2000);
+//* L54 */ setInterval(() => {
+//* L55 */     if (camera && controls) {
+//* L56 */         console.log("--- VIEW DATA ---");
+//* L57 */         console.log("Cam:", camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
+//* L58 */         console.log("Tar:", controls.target.x.toFixed(2), controls.target.y.toFixed(2), controls.target.z.toFixed(2));
+//* L59 */     }
+//* L60 */ }, 2000);
 /* L61 */ 
 /* L62 */ // Window Resize Handler
 /* L63 */ window.addEventListener('resize', () => {
