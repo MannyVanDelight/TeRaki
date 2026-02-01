@@ -9,6 +9,7 @@
 /* L09 */ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 /* L10 */ const renderer = new THREE.WebGLRenderer({ antialias: true });
 /* L11 */ renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace; // Ensures colors match Blender
 /* L12 */ document.body.appendChild(renderer.domElement);
 /* L13 */ 
 /* L14 */ // --- 2. LIGHTS ---
