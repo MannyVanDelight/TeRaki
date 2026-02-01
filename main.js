@@ -36,14 +36,21 @@ renderer.outputColorSpace = THREE.SRGBColorSpace; // Ensures colors match Blende
 /* L34 */ loader.setDRACOLoader(dracoLoader);
 /* L35 */ 
 /* L32 */ loader.load('./models/TeRaki-05.glb', (gltf) => {
-/* L33 */     gltf.scene.traverse((child) => {
-/* L34 */         if (child.isMesh) {
-/* L35 */             // This makes the baked texture "self-illuminated"
-/* L36 */             child.material.emissive = child.material.color;
-/* L37 */             child.material.emissiveMap = child.material.map;
-/* L38 */             child.material.emissiveIntensity = 1.0; 
-/* L39 */         }
-/* L40 */     });
+/* L33 */ gltf.scene.traverse((child) => {
+/* L34 */     if (child.isMesh) {
+/* L35 */         // 1. Keep the baked glow
+/* L36 */         child.material.emissive = child.material.color;
+/* L37 */         child.material.emissiveMap = child.material.map;
+/* L38 */         child.material.emissiveIntensity = 1.0; 
+/* L39 */
+/* L40 */         // 2. Fix the Windows / Transparency
+/* L41 */         if (child.material.map && child.material.map.format === THREE.RGBAFormat || child.material.transparent) {
+/* L42 */             child.material.transparent = true;
+/* L43 */             child.material.alphaTest = 0.5; // Helps prevent weird layering glitches
+/* L44 */             child.material.side = THREE.DoubleSide; // See windows from inside and out
+/* L45 */         }
+/* L46 */     }
+/* L47 */ });
 /* L41 */     scene.add(gltf.scene);
 /* L42 */     console.log("Baked Unlit Model Loaded!");
 /* L43 */ });
