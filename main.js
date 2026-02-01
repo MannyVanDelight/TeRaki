@@ -27,29 +27,38 @@ dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5
 loader.setDRACOLoader(dracoLoader);
 
 loader.load('./models/TeRaki-05.glb', (gltf) => {
-    
     gltf.scene.traverse((child) => {
         if (child.isMesh) {
-            // Instead of replacing the material, we just adjust two settings:
-            
-            // 1. If there is a texture, make it emissive so it stays bright without lights
-            if (child.material.map) {
-                child.material.emissive = new THREE.Color(0xffffff);
-                child.material.emissiveMap = child.material.map;
-                child.material.emissiveIntensity = 1.0;
+            const m = child.material;
+
+            // 1. Find ANY texture available (Base Map or Emissive Map)
+            const bakedTexture = m.map || m.emissiveMap;
+
+            if (bakedTexture) {
+                // Force the texture into both slots to be safe
+                m.map = bakedTexture;
+                m.emissiveMap = bakedTexture;
+                m.emissive = new THREE.Color(0xffffff);
+                m.emissiveIntensity = 1.0;
+                
+                // This is the "Light Switch" - makes it ignore scene darkness
+                m.color.set(0xffffff); 
+            } else {
+                // If NO texture is found, make it grey so it's not pitch black
+                console.warn("No texture found for:", child.name);
+                m.color.set(0xcccccc);
             }
 
-            // 2. Ensure transparency is respected for windows
-            child.material.transparent = true;
-            child.material.alphaTest = 0.5;
-            child.material.side = THREE.DoubleSide;
+            // 2. Window Fix
+            m.transparent = true;
+            m.alphaTest = 0.5;
+            m.side = THREE.DoubleSide;
+            m.needsUpdate = true;
         }
     });
 
     scene.add(gltf.scene);
-    console.log("Model loaded with emissive textures.");
-}, undefined, (error) => {
-    console.error("Loading error:", error);
+    console.log("Model Displayed.");
 });
 
 // --- 4. ANIMATION LOOP ---
