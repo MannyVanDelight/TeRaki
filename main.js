@@ -5,30 +5,24 @@
 
 // --- 1. SETUP ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x808080); // Grey background
+scene.background = new THREE.Color(0x808080); 
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-
-// CRITICAL: This makes the colors from Blender look correct
 renderer.outputColorSpace = THREE.SRGBColorSpace; 
 document.body.appendChild(renderer.domElement);
 
 // --- 2. CONTROLS ---
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; 
-
-// Your Pitch-Ready Camera Position
 camera.position.set(-5, 10, -7); 
 controls.target.set(-0.5, -1, 0.8);
 controls.update();
 
-// --- 3. LOAD MODEL WITH DRACO ---
+// --- 3. LOAD MODEL ---
 const loader = new GLTFLoader();
 const dracoLoader = new DRACOLoader();
-
-// Point to the unzipping tools
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 loader.setDRACOLoader(dracoLoader);
 
@@ -36,34 +30,26 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
     
     gltf.scene.traverse((child) => {
         if (child.isMesh) {
-            const m = child.material;
-
-            // --- THE UNLIT TRICK ---
-            // We set emissive to the texture map so it "glows" its own color
-            if (m.map) {
-                m.emissive = new THREE.Color(0xffffff); // White light
-                m.emissiveMap = m.map;                  // ...filtered through your texture
-                m.emissiveIntensity = 1.0; 
-                
-                // We darken the base color so scene lights (which we deleted) don't affect it
-                m.color.set(0x000000); 
-                
-                // --- ALPHA / WINDOW FIX ---
-                m.transparent = true;
-                m.alphaTest = 0.5; 
-                m.side = THREE.DoubleSide;
-            }
+            // Instead of replacing the material, we just adjust two settings:
             
-            m.needsUpdate = true;
+            // 1. If there is a texture, make it emissive so it stays bright without lights
+            if (child.material.map) {
+                child.material.emissive = new THREE.Color(0xffffff);
+                child.material.emissiveMap = child.material.map;
+                child.material.emissiveIntensity = 1.0;
+            }
+
+            // 2. Ensure transparency is respected for windows
+            child.material.transparent = true;
+            child.material.alphaTest = 0.5;
+            child.material.side = THREE.DoubleSide;
         }
     });
 
     scene.add(gltf.scene);
-    console.log("Model Loaded & Materials Optimized");
-}, 
-undefined, 
-(error) => {
-    console.error("Error loading model:", error);
+    console.log("Model loaded with emissive textures.");
+}, undefined, (error) => {
+    console.error("Loading error:", error);
 });
 
 // --- 4. ANIMATION LOOP ---
@@ -74,5 +60,16 @@ function animate() {
 }
 animate();
 
-// --- 5. WINDOW RESIZE ---
-window.addEventListener('
+// --- 5. COORDINATE FINDER ---
+setInterval(() => {
+    if (camera && controls) {
+        console.log("Cam:", camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
+        console.log("Tar:", controls.target.x.toFixed(2), controls.target.y.toFixed(2), controls.target.z.toFixed(2));
+    }
+}, 2000);
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
