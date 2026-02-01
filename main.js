@@ -1,7 +1,7 @@
 /* L01 */ import * as THREE from 'three';
 /* L02 */ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 /* L03 */ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-/* L04 */ 
+/* L04 */ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 /* L05 */ // --- 1. SETUP ---
 /* L06 */ const scene = new THREE.Scene();
 /* L07 */ scene.background = new THREE.Color(0x808080); 
