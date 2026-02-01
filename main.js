@@ -1,7 +1,7 @@
 /* L01 */ import * as THREE from 'three';
 /* L02 */ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 /* L03 */ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-/* L04 */ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+/* L04 */ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'; // Ensure this is here!
 
 // --- 1. SETUP ---
 const scene = new THREE.Scene();
@@ -23,16 +23,18 @@ controls.update();
 // --- 3. LOAD MODEL ---
 const loader = new GLTFLoader();
 const dracoLoader = new DRACOLoader();
+// This is the "Unzipper" from Google
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 loader.setDRACOLoader(dracoLoader);
 
 loader.load('./models/TeRaki-05.glb', (gltf) => {
+    console.log("File downloaded, starting material conversion...");
     
     gltf.scene.traverse((child) => {
         if (child.isMesh) {
             const oldMat = child.material;
             
-            // Rebuilding the material to be UNLIT
+            // Rebuilding the material to be UNLIT (Basic)
             const newMat = new THREE.MeshBasicMaterial({
                 side: THREE.DoubleSide
             });
@@ -46,12 +48,11 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
             }
 
             child.material = newMat;
-            console.log("Fixed material for:", child.name);
         }
     });
 
-    scene.add(gltf.scene); // THIS must happen AFTER the traverse
-    console.log("Baked Unlit Model Successfully Added to Scene!");
+    scene.add(gltf.scene); 
+    console.log("Success: Model is in the scene.");
 }, 
 undefined, 
 (error) => {
@@ -66,14 +67,7 @@ function animate() {
 }
 animate();
 
-// --- 5. COORDINATE FINDER ---
-setInterval(() => {
-    if (camera && controls) {
-        console.log("Cam:", camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
-        console.log("Tar:", controls.target.x.toFixed(2), controls.target.y.toFixed(2), controls.target.z.toFixed(2));
-    }
-}, 2000);
-
+// --- 5. WINDOW RESIZE ---
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
