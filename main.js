@@ -40,15 +40,25 @@ renderer.outputColorSpace = THREE.SRGBColorSpace; // Ensures colors match Blende
 /* L34 */     if (child.isMesh) {
 /* L35 */         const oldMat = child.material;
 /* L36 */         
-/* L37 */         // Create a new "Basic" material that doesn't need lights
-/* L38 */         child.material = new THREE.MeshBasicMaterial({
-/* L39 */             map: oldMat.map,
-/* L40 */             color: oldMat.color,
-/* L41 */             transparent: true,      // Allows the alpha channel to work
-/* L42 */             alphaTest: 0.1,         // Makes sure glass/alpha isn't pitch black
-/* L43 */             side: THREE.DoubleSide  // Visible from both sides
-/* L44 */         });
-/* L45 */         
+/* L37 */         // Create the new material
+/* L38 */         const newMat = new THREE.MeshBasicMaterial({
+/* L39 */             side: THREE.DoubleSide
+/* L40 */         });
+/* L41 */
+/* L42 */         if (oldMat.map) {
+/* L43 */             // If it has a texture (your bake), use it!
+/* L44 */             newMat.map = oldMat.map;
+/* L45 */             newMat.transparent = true;
+/* L46 */             newMat.alphaTest = 0.05; 
+/* L47 */         } else {
+/* L48 */             // If no texture, use the base color so it's not black
+/* L49 */             newMat.color = oldMat.color;
+/* L50 */         }
+/* L51 */
+/* L52 */         child.material = newMat;
+/* L53 */         child.material.needsUpdate = true;
+/* L54 */     }
+/* L55 */ });
 /* L46 */         console.log("Material converted to Unlit for:", child.name);
 /* L47 */     }
 /* L48 */ });
