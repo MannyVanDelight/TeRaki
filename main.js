@@ -22,8 +22,8 @@
 /* L22 */ // --- 3. CONTROLS ---
 /* L23 */ const controls = new OrbitControls(camera, renderer.domElement);
 /* L24 */ controls.enableDamping = true; 
-/* L25 */ camera.position.set(-7, 10, -6); 
-/* L26 */ controls.target.set(-3, -1, 2);
+/* L25 */ camera.position.set(-5, 10, -7); 
+/* L26 */ controls.target.set(-0.5, -1, 0.8);
 /* L26b*/ controls.update();
 /* L27 */ 
 /* L28 */ // --- 4. LOAD MODEL WITH DRACO ---
