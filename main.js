@@ -12,12 +12,12 @@
 /* L12 */ document.body.appendChild(renderer.domElement);
 /* L13 */ 
 /* L14 */ // --- 2. LIGHTS ---
-/* L15 */ const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
-/* L16 */ scene.add(ambientLight);
+//* L15 */ const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+//* L16 */ scene.add(ambientLight);
 /* L17 */ 
-/* L18 */ const dirLight = new THREE.DirectionalLight(0xffffff, 2);
-/* L19 */ dirLight.position.set(5, 10, 7);
-/* L20 */ scene.add(dirLight);
+//* L18 */ const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+//* L19 */ dirLight.position.set(5, 10, 7);
+//* L20 */ scene.add(dirLight);
 /* L21 */ 
 /* L22 */ // --- 3. CONTROLS ---
 /* L23 */ const controls = new OrbitControls(camera, renderer.domElement);
@@ -34,18 +34,18 @@
 /* L33 */ dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 /* L34 */ loader.setDRACOLoader(dracoLoader);
 /* L35 */ 
-/* L36 */ loader.load(
-/* L37 */     './models/TeRaki-05.glb', 
-/* L38 */     (gltf) => {
-/* L39 */         scene.add(gltf.scene);
-/* L40 */         console.log("Compressed Model Loaded!");
-/* L41 */         controls.update();
-/* L42 */     },
-/* L43 */     undefined,
-/* L44 */     (error) => {
-/* L45 */         console.error("Loader error:", error);
-/* L46 */     }
-/* L47 */ );
+/* L32 */ loader.load('./models/TeRaki-05.glb', (gltf) => {
+/* L33 */     gltf.scene.traverse((child) => {
+/* L34 */         if (child.isMesh) {
+/* L35 */             // This makes the baked texture "self-illuminated"
+/* L36 */             child.material.emissive = child.material.color;
+/* L37 */             child.material.emissiveMap = child.material.map;
+/* L38 */             child.material.emissiveIntensity = 1.0; 
+/* L39 */         }
+/* L40 */     });
+/* L41 */     scene.add(gltf.scene);
+/* L42 */     console.log("Baked Unlit Model Loaded!");
+/* L43 */ });
 /* L44 */ 
 /* L45 */ // --- 5. ANIMATION LOOP ---
 /* L46 */ function animate() {
