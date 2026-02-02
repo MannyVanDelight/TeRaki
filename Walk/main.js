@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 
-// --- 1. BASIC SETUP ---
+// --- 1. SETUP ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xff0000); // Darker background to make the house pop
+scene.background = new THREE.Color(0x111111); // Deep charcoal background
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-// Starting position: slightly back and at a 1.4m "human" height
+// Starting position: slightly back and at a "human" height
 camera.position.set(0, 1.4, 5); 
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -15,86 +15,62 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
-// --- 2. CONTROLS (THE FIX) ---
-// PointerLockControls is mathematically incapable of "rolling" the horizon.
+// --- 2. THE CONTROLS (HORIZON LOCKED) ---
 const controls = new PointerLockControls(camera, document.body);
 
-// Click anywhere to start the tour
+// Click anywhere to lock the mouse and start the tour
 document.addEventListener('click', () => {
     controls.lock();
 });
 
-const keyStates = {
-    forward: false,
-    backward: false,
-    left: false,
-    right: false,
-    up: false,
-    down: false
-};
+const keyStates = {};
+document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
+document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 
-document.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyW') keyStates.forward = true;
-    if (e.code === 'KeyS') keyStates.backward = true;
-    if (e.code === 'KeyA') keyStates.left = true;
-    if (e.code === 'KeyD') keyStates.right = true;
-    if (e.code === 'KeyE') keyStates.up = true;   // E to fly UP
-    if (e.code === 'KeyQ') keyStates.down = true; // Q to fly DOWN
-});
-
-document.addEventListener('keyup', (e) => {
-    if (e.code === 'KeyW') keyStates.forward = false;
-    if (e.code === 'KeyS') keyStates.backward = false;
-    if (e.code === 'KeyA') keyStates.left = false;
-    if (e.code === 'KeyD') keyStates.right = false;
-    if (e.code === 'KeyE') keyStates.up = false;
-    if (e.code === 'KeyQ') keyStates.down = false;
-});
-
-// --- 3. LOAD THE MODEL ---
+// --- 3. THE MODEL ---
 const loader = new GLTFLoader();
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     gltf.scene.traverse((child) => {
         if (child.isMesh) {
-            // Apply your baked texture to the emissive slot so it's bright
+            // Restore your baked lighting
             child.material.emissive = new THREE.Color(0xffffff);
             child.material.emissiveMap = child.material.map;
             child.material.emissiveIntensity = 1.0;
             
-            // Transparency for windows
+            // Transparency for windows/glass
             if (child.material.map) {
                 child.material.transparent = true;
                 child.material.alphaTest = 0.5;
+                child.material.side = THREE.DoubleSide;
             }
         }
     });
     scene.add(gltf.scene);
-    console.log("Model loaded. Click screen to move. Q/E for height.");
+    console.log("Tour Active: Click to start. WASD to walk. Q/E to change height.");
 });
 
-// --- 4. ANIMATION LOOP ---
+// --- 4. ENGINE LOOP ---
 function animate() {
     requestAnimationFrame(animate);
 
     if (controls.isLocked) {
-        const moveSpeed = 0.1;
+        const speed = 0.08; // Walking speed
         
-        if (keyStates.forward) controls.moveForward(moveSpeed);
-        if (keyStates.backward) controls.moveForward(-moveSpeed);
-        if (keyStates.left) controls.moveRight(-moveSpeed);
-        if (keyStates.right) controls.moveRight(moveSpeed);
+        // Standard WASD
+        if (keyStates['KeyW']) controls.moveForward(speed);
+        if (keyStates['KeyS']) controls.moveForward(-speed);
+        if (keyStates['KeyA']) controls.moveRight(-speed);
+        if (keyStates['KeyD']) controls.moveRight(speed);
         
-        // Manual Height Control (The specific fix you asked for)
-        if (keyStates.up) camera.position.y += moveSpeed;
-        if (keyStates.down) camera.position.y -= moveSpeed;
+        // --- HEIGHT CONTROLS ---
+        if (keyStates['KeyE']) camera.position.y += speed; // Go UP
+        if (keyStates['KeyQ']) camera.position.y -= speed; // Go DOWN
     }
 
     renderer.render(scene, camera);
 }
-
 animate();
 
-// Handle Window Resize
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
