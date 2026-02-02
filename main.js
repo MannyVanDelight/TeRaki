@@ -10,8 +10,8 @@ scene.background = new THREE.Color(0x808080);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-// NEW: Store rotation in a dedicated object to prevent the "Roll" fight
-const playerRotation = new THREE.Euler(0, 0, 0, 'YXZ');
+// Use a specific Euler order to prevent the horizon from twisting
+camera.rotation.order = 'YXZ'; 
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -23,56 +23,59 @@ const clock = new THREE.Clock();
 // --- 2. PHYSICS & PLAYER ---
 const worldOctree = new Octree();
 
-// FORCE EYE LEVEL: We will manually offset the camera from the feet
-const playerCollider = new Capsule(new THREE.Vector3(0, 0.35, 0), new THREE.Vector3(0, 1.35, 0), 0.35);
+// Shrunk radius to 0.15 so you fit through tight Blender doors/geo
+const playerCollider = new Capsule(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1.0, 0), 0.15);
 const playerVelocity = new THREE.Vector3();
 const playerDirection = new THREE.Vector3();
 
-// Spawn point
-const spawnPoint = new THREE.Vector3(-2, 0, 5); 
-
-// --- 3. CONTROLS ---
+// --- 3. MOVEMENT & LOOK STATE ---
 const keyStates = {};
 let isMovingMobile = false;
+
+// Look variables
+let lon = 0; // Horizontal (Left/Right)
+let lat = 0; // Vertical (Up/Down)
 
 document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
 document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 window.addEventListener('touchstart', () => { isMovingMobile = true; });
 window.addEventListener('touchend', () => { isMovingMobile = false; });
 
-document.addEventListener('mousedown', () => { document.body.requestPointerLock(); });
+document.addEventListener('mousedown', () => { 
+    if (document.pointerLockElement !== document.body) document.body.requestPointerLock(); 
+});
 
 document.body.addEventListener('mousemove', (event) => {
     if (document.pointerLockElement === document.body) {
-        // We update our CUSTOM rotation object, NOT the camera directly yet
-        playerRotation.y -= event.movementX * 0.002;
-        playerRotation.x -= event.movementY * 0.002;
-
-        // Clamp vertical look
-        playerRotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, playerRotation.x));
+        // Adjust these numbers to change mouse sensitivity
+        lon -= event.movementX * 0.1; 
+        lat -= event.movementY * 0.1;
         
-        // STRIKE THE ROLL: We never touch playerRotation.z, so it stays 0
+        // Clamp vertical look so you can't flip over
+        lat = Math.max(-89, Math.min(89, lat));
     }
 });
 
-// --- 4. MOVEMENT ---
-function handleControls(deltaTime) {
-    const speed = 10;
-    
-    // Calculate direction based on our stable playerRotation
-    const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, playerRotation.y, 0));
-    const side = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, playerRotation.y, 0));
-
-    if (keyStates['KeyW'] || isMovingMobile) playerVelocity.add(forward.multiplyScalar(speed * deltaTime));
-    if (keyStates['KeyS']) playerVelocity.add(forward.multiplyScalar(-speed * deltaTime));
-    if (keyStates['KeyA']) playerVelocity.add(side.multiplyScalar(-speed * deltaTime));
-    if (keyStates['KeyD']) playerVelocity.add(side.multiplyScalar(speed * deltaTime));
-}
-
+// --- 4. ENGINE LOGIC ---
 function updatePlayer(deltaTime) {
+    // 1. Damping (Friction)
     let damping = Math.exp(-4 * deltaTime) - 1;
     playerVelocity.addScaledVector(playerVelocity, damping);
 
+    // 2. Movement Input
+    const speed = 10;
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    forward.y = 0; // Keep movement strictly horizontal
+    forward.normalize();
+    
+    const side = new THREE.Vector3().crossVectors(camera.up, forward).normalize();
+
+    if (keyStates['KeyW'] || isMovingMobile) playerVelocity.add(forward.multiplyScalar(speed * deltaTime));
+    if (keyStates['KeyS']) playerVelocity.add(forward.multiplyScalar(-speed * deltaTime));
+    if (keyStates['KeyA']) playerVelocity.add(side.multiplyScalar(speed * deltaTime));
+    if (keyStates['KeyD']) playerVelocity.add(side.multiplyScalar(-speed * deltaTime));
+
+    // 3. Collision
     const deltaPosition = playerVelocity.clone().multiplyScalar(deltaTime);
     playerCollider.translate(deltaPosition);
 
@@ -81,13 +84,24 @@ function updatePlayer(deltaTime) {
         playerCollider.translate(result.normal.multiplyScalar(result.depth));
     }
 
-    // --- FORCING CAMERA HEIGHT ---
-    // We take the feet position (start) and add exactly 1.5m to it
-    camera.position.copy(playerCollider.start);
-    camera.position.y += 1.5; // Change this number to go higher/lower instantly
+    // 4. THE HEIGHT FIX (Manual Eye Level)
+    // We place the camera exactly 1.2 meters above the bottom of the capsule
+    camera.position.set(
+        playerCollider.start.x,
+        playerCollider.start.y + 1.2, 
+        playerCollider.start.z
+    );
 
-    // --- FORCING HORIZON LOCK ---
-    camera.quaternion.setFromEuler(playerRotation);
+    // 5. THE ROLL FIX (Look Logic)
+    // We convert our degrees (lon/lat) into a target point for the camera to look at
+    const phi = THREE.MathUtils.degToRad(90 - lat);
+    const theta = THREE.MathUtils.degToRad(lon);
+
+    const target = new THREE.Vector3();
+    target.setFromSphericalCoords(1, phi, theta).add(camera.position);
+    
+    // lookAt forces the horizon to stay level (Up is always 0,1,0)
+    camera.lookAt(target);
 }
 
 // --- 5. LOAD MODEL ---
@@ -111,12 +125,13 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
     });
     scene.add(gltf.scene);
     worldOctree.fromGraphNode(gltf.scene); 
-    playerCollider.translate(spawnPoint);
+    
+    // Starting point
+    playerCollider.translate(new THREE.Vector3(-2, 0, 5));
 });
 
 function animate() {
     const deltaTime = Math.min(0.05, clock.getDelta());
-    handleControls(deltaTime);
     updatePlayer(deltaTime);
     renderer.render(scene, camera);
     requestAnimationFrame(animate);
