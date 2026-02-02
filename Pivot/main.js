@@ -83,12 +83,12 @@ function animate() {
 animate();
 
 // --- 5. COORDINATE FINDER ---
-setInterval(() => {
-    if (camera && controls) {
-        console.log("Cam:", camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
-        console.log("Tar:", controls.target.x.toFixed(2), controls.target.y.toFixed(2), controls.target.z.toFixed(2));
-    }
-}, 2000);
+//setInterval(() => {
+//    if (camera && controls) {
+//        console.log("Cam:", camera.position.x.toFixed(2), camera.position.y.toFixed(2), camera.position.z.toFixed(2));
+//        console.log("Tar:", controls.target.x.toFixed(2), controls.target.y.toFixed(2), controls.target.z.toFixed(2));
+//    }
+//}, 2000);
 
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
