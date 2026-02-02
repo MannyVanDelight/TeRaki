@@ -8,8 +8,8 @@ import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x808080);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-// This specific order prevents the camera from "rolling" when looking around
+// Reduced FOV to 60 for more realistic human scale
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.rotation.order = 'YXZ'; 
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -22,13 +22,12 @@ const clock = new THREE.Clock();
 // --- 2. PHYSICS & PLAYER ---
 const worldOctree = new Octree();
 
-// Capsule(start, end, radius). 
-// Start is 0 (feet), End is 1.7 (eyes). Radius is 0.35 (body width)
-const playerCollider = new Capsule(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1.7, 0), 0.35);
+// Capsule eyes at 1.6m (End point). Start point is 0 (Feet).
+const playerCollider = new Capsule(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1.6, 0), 0.35);
 const playerVelocity = new THREE.Vector3();
 const playerDirection = new THREE.Vector3();
 
-// Adjust this spawn point to your apartment's entry coordinates
+// Spawn Point: X, Y (Floor), Z. Keep Y at 0 to stay on the ground.
 const spawnPoint = new THREE.Vector3(-2, 0, 5); 
 
 // --- 3. CONTROLS STATE ---
@@ -41,27 +40,105 @@ window.addEventListener('touchstart', () => { isMovingMobile = true; });
 window.addEventListener('touchend', () => { isMovingMobile = false; });
 
 // Desktop Mouse Look
-document.addEventListener('mousedown', () => { document.body.requestPointerLock(); });
+document.addEventListener('mousedown', () => { 
+    if (document.pointerLockElement !== document.body) {
+        document.body.requestPointerLock();
+    }
+});
+
 document.body.addEventListener('mousemove', (event) => {
     if (document.pointerLockElement === document.body) {
         camera.rotation.y -= event.movementX * 0.002;
         camera.rotation.x -= event.movementY * 0.002;
-
-        // Clamp vertical look to 90 degrees up/down
         camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
-        
-        // HORIZON LOCK: Force Z-rotation to zero to prevent "rolling"
-        camera.rotation.z = 0; 
+        camera.rotation.z = 0; // Horizon lock
     }
 });
 
 // --- 4. MOVEMENT CALCULATIONS ---
 function getForwardVector() {
     camera.getWorldDirection(playerDirection);
-    playerDirection.y = 0; // Keep movement on the horizontal plane
+    playerDirection.y = 0;
     playerDirection.normalize();
     return playerDirection;
 }
 
 function getSideVector() {
-    camera.getWorldDirection
+    camera.getWorldDirection(playerDirection);
+    playerDirection.y = 0;
+    playerDirection.normalize();
+    playerDirection.cross(camera.up);
+    return playerDirection;
+}
+
+function handleControls(deltaTime) {
+    const speed = 12; // Adjusted speed for a more natural walking pace
+    if (keyStates['KeyW'] || isMovingMobile) playerVelocity.add(getForwardVector().multiplyScalar(speed * deltaTime));
+    if (keyStates['KeyS']) playerVelocity.add(getForwardVector().multiplyScalar(-speed * deltaTime));
+    if (keyStates['KeyA']) playerVelocity.add(getSideVector().multiplyScalar(-speed * deltaTime));
+    if (keyStates['KeyD']) playerVelocity.add(getSideVector().multiplyScalar(speed * deltaTime));
+}
+
+function updatePlayer(deltaTime) {
+    let damping = Math.exp(-4 * deltaTime) - 1;
+    playerVelocity.addScaledVector(playerVelocity, damping);
+
+    const deltaPosition = playerVelocity.clone().multiplyScalar(deltaTime);
+    playerCollider.translate(deltaPosition);
+
+    // Collision detection against the Octree world
+    const result = worldOctree.capsuleIntersect(playerCollider);
+    if (result) {
+        playerCollider.translate(result.normal.multiplyScalar(result.depth));
+    }
+
+    // Camera matches the 'head' of the capsule
+    camera.position.copy(playerCollider.end);
+    camera.rotation.z = 0;
+}
+
+// --- 5. LOAD MODEL ---
+const loader = new GLTFLoader();
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+loader.setDRACOLoader(dracoLoader);
+
+loader.load('./models/TeRaki-05.glb', (gltf) => {
+    gltf.scene.traverse((child) => {
+        if (child.isMesh) {
+            // Restore your working emissive/unlit material settings
+            child.material.emissive = new THREE.Color(0xffffff);
+            child.material.emissiveMap = child.material.map;
+            child.material.emissiveIntensity = 1.0;
+            
+            if (child.material.map) {
+                child.material.transparent = true;
+                child.material.alphaTest = 0.5;
+                child.material.side = THREE.DoubleSide;
+            }
+        }
+    });
+
+    scene.add(gltf.scene);
+    worldOctree.fromGraphNode(gltf.scene); 
+    
+    // Position player at spawn
+    playerCollider.translate(spawnPoint);
+    console.log("Tour initialized at 1.6m height with FOV 60.");
+});
+
+// --- 6. ENGINE LOOP ---
+function animate() {
+    const deltaTime = Math.min(0.05, clock.getDelta());
+    handleControls(deltaTime);
+    updatePlayer(deltaTime);
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+}
+animate();
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
