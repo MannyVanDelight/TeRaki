@@ -5,7 +5,20 @@
 
 // --- 1. SETUP ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x808080); 
+
+// CREATE GRADIENT BACKGROUND
+const canvas = document.createElement('canvas');
+canvas.width = 2;
+canvas.height = 512;
+const context = canvas.getContext('2d');
+const gradient = context.createLinearGradient(0, 0, 0, 512);
+gradient.addColorStop(0, '#e0e0e0'); // Light grey (Top)
+gradient.addColorStop(1, '#444444'); // Darker grey (Bottom)
+context.fillStyle = gradient;
+context.fillRect(0, 0, 2, 512);
+
+const bgTexture = new THREE.CanvasTexture(canvas);
+scene.background = bgTexture;
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
