@@ -6,18 +6,19 @@ import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockCont
 // --- 1. SETUP ---
 const scene = new THREE.Scene();
 
-// Gradient Background
+// CACHE CHECK: NEW GRADIENT (Sunset Gold to Dark Orange)
 const canvas = document.createElement('canvas');
 canvas.width = 2; canvas.height = 512;
 const context = canvas.getContext('2d');
 const gradient = context.createLinearGradient(0, 0, 0, 512);
-gradient.addColorStop(0, '#e0e0e0'); 
-gradient.addColorStop(1, '#444444'); 
+gradient.addColorStop(0, '#ffcc33'); // Gold Top
+gradient.addColorStop(1, '#662200'); // Dark Brown/Orange Bottom
 context.fillStyle = gradient;
 context.fillRect(0, 0, 2, 512);
 scene.background = new THREE.CanvasTexture(canvas);
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+// WIDER FOV: Changed from 60 to 80 to make the house feel much bigger
+const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 1.4, 8); 
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -36,11 +37,10 @@ const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
 document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 
-// --- 3. MOBILE: SEPARATE TURN & MOVE ---
+// --- 3. MOBILE: INDEPENDENT ROTATION & MOVEMENT ---
 let touchX, touchY;
 
 renderer.domElement.addEventListener('touchstart', (e) => {
-    // If you tap with one finger and don't move it much, it's a "Move" command
     isTouching = true;
     touchX = e.touches[0].pageX;
     touchY = e.touches[0].pageY;
@@ -48,36 +48,23 @@ renderer.domElement.addEventListener('touchstart', (e) => {
 
 renderer.domElement.addEventListener('touchmove', (e) => {
     const t = e.touches[0];
-    
-    // Calculate Swipe Distance
     const dx = t.pageX - touchX;
     const dy = t.pageY - touchY;
 
-    // SENSITIVITY: Higher value here makes U-turns easier
-    const sensitivity = 0.007;
+    // SENSITIVITY: Increased for easier U-turns
+    const sensitivity = 0.008;
 
-    // Rotate camera independently of movement
     camera.rotation.y -= dx * sensitivity;
     camera.rotation.x -= dy * sensitivity;
-    
-    // Lock horizon and clamp vertical look
     camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
     camera.rotation.z = 0; 
 
-    // Update coordinates for next frame
     touchX = t.pageX;
     touchY = t.pageY;
-
-    // If we are swiping significantly, stop walking so we can turn in place
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-        // This allows "Stationary Turning"
-    }
 }, { passive: false });
 
 renderer.domElement.addEventListener('touchend', () => {
     isTouching = false;
-    touchX = undefined;
-    touchY = undefined;
 }, { passive: false });
 
 // --- 4. MODEL LOADING (DRACO) ---
@@ -106,9 +93,8 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
 function animate() {
     requestAnimationFrame(animate);
 
-    const speed = 0.04; // Half-speed as requested
+    const speed = 0.04; // Premium slow walking speed
 
-    // KEYBOARD (Desktop)
     if (controls.isLocked) {
         if (keyStates['KeyW']) controls.moveForward(speed);
         if (keyStates['KeyS']) controls.moveForward(-speed);
@@ -118,8 +104,7 @@ function animate() {
         if (keyStates['KeyQ']) camera.position.y -= speed;
     }
 
-    // MOBILE MOVEMENT (Auto-Forward on Tap)
-    // We only move forward if we aren't swiping wildly
+    // Mobile movement
     if (isTouching && isMobile) {
         controls.moveForward(speed);
     }
