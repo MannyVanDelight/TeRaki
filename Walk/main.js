@@ -27,46 +27,60 @@ document.body.appendChild(renderer.domElement);
 
 // --- 2. CONTROLS STATE ---
 const controls = new PointerLockControls(camera, document.body);
-document.addEventListener('click', () => controls.lock());
+document.addEventListener('click', () => { if(!isMobile) controls.lock(); });
 
 const keyStates = {};
-let isTouching = false; // For mobile forward movement
+let isTouching = false; 
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
 document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
 document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 
-// --- 3. MOBILE TOUCH LOGIC ---
-// Tap and hold to move forward
+// --- 3. MOBILE: SEPARATE TURN & MOVE ---
+let touchX, touchY;
+
 renderer.domElement.addEventListener('touchstart', (e) => {
+    // If you tap with one finger and don't move it much, it's a "Move" command
     isTouching = true;
-    // If not locked (on mobile), we manually trigger rotation via touch in the loop
+    touchX = e.touches[0].pageX;
+    touchY = e.touches[0].pageY;
+}, { passive: false });
+
+renderer.domElement.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    
+    // Calculate Swipe Distance
+    const dx = t.pageX - touchX;
+    const dy = t.pageY - touchY;
+
+    // SENSITIVITY: Higher value here makes U-turns easier
+    const sensitivity = 0.007;
+
+    // Rotate camera independently of movement
+    camera.rotation.y -= dx * sensitivity;
+    camera.rotation.x -= dy * sensitivity;
+    
+    // Lock horizon and clamp vertical look
+    camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+    camera.rotation.z = 0; 
+
+    // Update coordinates for next frame
+    touchX = t.pageX;
+    touchY = t.pageY;
+
+    // If we are swiping significantly, stop walking so we can turn in place
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        // This allows "Stationary Turning"
+    }
 }, { passive: false });
 
 renderer.domElement.addEventListener('touchend', () => {
     isTouching = false;
+    touchX = undefined;
+    touchY = undefined;
 }, { passive: false });
 
-// For mobile rotation (swiping)
-let touchX, touchY;
-renderer.domElement.addEventListener('touchmove', (e) => {
-    if (e.touches.length === 1) {
-        const t = e.touches[0];
-        if (touchX !== undefined && touchY !== undefined) {
-            const dx = t.pageX - touchX;
-            const dy = t.pageY - touchY;
-            
-            // Manually rotate camera based on swipe
-            camera.rotation.y -= dx * 0.005;
-            camera.rotation.x -= dy * 0.005;
-            camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
-            camera.rotation.z = 0; // Maintain horizon lock
-        }
-        touchX = t.pageX;
-        touchY = t.pageY;
-    }
-}, { passive: false });
-
-// --- 4. MODEL LOADING ---
+// --- 4. MODEL LOADING (DRACO) ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
@@ -92,24 +106,22 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
 function animate() {
     requestAnimationFrame(animate);
 
-    // Speed halved to 0.04 for a smooth cinematic walk
-    const speed = 0.04;
+    const speed = 0.04; // Half-speed as requested
 
-    if (controls.isLocked || isTouching) {
-        // Keyboard movement
+    // KEYBOARD (Desktop)
+    if (controls.isLocked) {
         if (keyStates['KeyW']) controls.moveForward(speed);
         if (keyStates['KeyS']) controls.moveForward(-speed);
         if (keyStates['KeyA']) controls.moveRight(-speed);
         if (keyStates['KeyD']) controls.moveRight(speed);
-        
-        // Manual Height
         if (keyStates['KeyE']) camera.position.y += speed;
         if (keyStates['KeyQ']) camera.position.y -= speed;
+    }
 
-        // Mobile Forward: move in the direction the camera is facing
-        if (isTouching && !controls.isLocked) {
-            controls.moveForward(speed);
-        }
+    // MOBILE MOVEMENT (Auto-Forward on Tap)
+    // We only move forward if we aren't swiping wildly
+    if (isTouching && isMobile) {
+        controls.moveForward(speed);
     }
 
     renderer.render(scene, camera);
