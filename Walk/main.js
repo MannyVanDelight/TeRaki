@@ -6,56 +6,78 @@ import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockCont
 // --- 1. SETUP ---
 const scene = new THREE.Scene();
 
-// CREATE GRADIENT BACKGROUND
+// Gradient Background
 const canvas = document.createElement('canvas');
-canvas.width = 2;
-canvas.height = 512;
+canvas.width = 2; canvas.height = 512;
 const context = canvas.getContext('2d');
 const gradient = context.createLinearGradient(0, 0, 0, 512);
-gradient.addColorStop(0, '#e0e0e0'); // Light grey (Top)
-gradient.addColorStop(1, '#444444'); // Darker grey (Bottom)
+gradient.addColorStop(0, '#e0e0e0'); 
+gradient.addColorStop(1, '#444444'); 
 context.fillStyle = gradient;
 context.fillRect(0, 0, 2, 512);
-
-const bgTexture = new THREE.CanvasTexture(canvas);
-scene.background = bgTexture;
-
-// Camera and renderer setup 
+scene.background = new THREE.CanvasTexture(canvas);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-// Start at human height, 8 meters back
-camera.position.set(0, 1.5, 8); 
+camera.position.set(0, 1.4, 8); 
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
-// --- 2. CONTROLS ---
+// --- 2. CONTROLS STATE ---
 const controls = new PointerLockControls(camera, document.body);
 document.addEventListener('click', () => controls.lock());
 
 const keyStates = {};
+let isTouching = false; // For mobile forward movement
+
 document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
 document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 
-// --- 3. DRACO & MODEL LOADING ---
-const dracoLoader = new DRACOLoader();
-// This link points to the official Google decoder files so it works anywhere
-dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+// --- 3. MOBILE TOUCH LOGIC ---
+// Tap and hold to move forward
+renderer.domElement.addEventListener('touchstart', (e) => {
+    isTouching = true;
+    // If not locked (on mobile), we manually trigger rotation via touch in the loop
+}, { passive: false });
 
+renderer.domElement.addEventListener('touchend', () => {
+    isTouching = false;
+}, { passive: false });
+
+// For mobile rotation (swiping)
+let touchX, touchY;
+renderer.domElement.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 1) {
+        const t = e.touches[0];
+        if (touchX !== undefined && touchY !== undefined) {
+            const dx = t.pageX - touchX;
+            const dy = t.pageY - touchY;
+            
+            // Manually rotate camera based on swipe
+            camera.rotation.y -= dx * 0.005;
+            camera.rotation.x -= dy * 0.005;
+            camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+            camera.rotation.z = 0; // Maintain horizon lock
+        }
+        touchX = t.pageX;
+        touchY = t.pageY;
+    }
+}, { passive: false });
+
+// --- 4. MODEL LOADING ---
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
-loader.setDRACOLoader(dracoLoader); // This fixes the error you saw!
+loader.setDRACOLoader(dracoLoader);
 
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     gltf.scene.traverse((child) => {
         if (child.isMesh) {
-            // Restore baked lighting
             child.material.emissive = new THREE.Color(0xffffff);
             child.material.emissiveMap = child.material.map;
             child.material.emissiveIntensity = 1.0;
-            
-            // Restore transparency
             if (child.material.map) {
                 child.material.transparent = true;
                 child.material.alphaTest = 0.5;
@@ -64,29 +86,30 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
         }
     });
     scene.add(gltf.scene);
-    console.log("Draco model loaded and emissive materials applied!");
-}, 
-// Progress log
-(xhr) => { console.log((xhr.loaded / xhr.total * 100) + '% loaded'); },
-// Error log
-(err) => { console.error("Loading error:", err); });
+});
 
-// --- 4. ENGINE LOOP ---
+// --- 5. ANIMATION LOOP ---
 function animate() {
     requestAnimationFrame(animate);
 
-    if (controls.isLocked) {
-        const speed = 0.1;
-        
-        // Horizontal
+    // Speed halved to 0.04 for a smooth cinematic walk
+    const speed = 0.04;
+
+    if (controls.isLocked || isTouching) {
+        // Keyboard movement
         if (keyStates['KeyW']) controls.moveForward(speed);
         if (keyStates['KeyS']) controls.moveForward(-speed);
         if (keyStates['KeyA']) controls.moveRight(-speed);
         if (keyStates['KeyD']) controls.moveRight(speed);
         
-        // Manual Height Override (Q/E)
+        // Manual Height
         if (keyStates['KeyE']) camera.position.y += speed;
         if (keyStates['KeyQ']) camera.position.y -= speed;
+
+        // Mobile Forward: move in the direction the camera is facing
+        if (isTouching && !controls.isLocked) {
+            controls.moveForward(speed);
+        }
     }
 
     renderer.render(scene, camera);
