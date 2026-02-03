@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 
 // --- 1. SETUP ---
 const scene = new THREE.Scene();
@@ -17,6 +16,7 @@ context.fillStyle = gradient;
 context.fillRect(0, 0, 2, 512);
 scene.background = new THREE.CanvasTexture(canvas);
 
+// FOV 80 for the "Big House" feel
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 1.4, 8);
 
@@ -25,67 +25,78 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
-// --- 2. THE STABLE ROTATION ENGINE ---
-let yaw = 0;   // Horizontal
-let pitch = 0; // Vertical
-const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+// --- 2. UNIFIED ROTATION ENGINE (NO ROLL EVER) ---
+// Start YAW at 180 degrees (PI) so we look AT the house, not away from it
+let yaw = Math.PI; 
+let pitch = 0; 
 
-// This function forces the camera to look at a target, keeping the horizon level
 function updateCameraRotation() {
     const target = new THREE.Vector3();
     const phi = THREE.MathUtils.degToRad(90 - pitch);
-    const theta = THREE.MathUtils.degToRad(yaw);
+    const theta = yaw;
+    
+    // Calculate where to look based on spherical coordinates
     target.setFromSphericalCoords(1, phi, theta).add(camera.position);
     camera.lookAt(target);
 }
 
-// --- 3. CONTROLS STATE ---
-const controls = new PointerLockControls(camera, document.body);
+// --- 3. INPUT HANDLING ---
 const keyStates = {};
-let isWalking = false;
-let touchStartX, touchStartY;
+let isWalkingMobile = false;
+let lastTouchX = 0;
+let lastTouchY = 0;
 
-// Desktop Click
-document.addEventListener('click', () => { if(!isMobile) controls.lock(); });
+// Desktop: Mouse Lock & Look
+document.body.requestPointerLock = document.body.requestPointerLock || document.body.mozRequestPointerLock;
+document.addEventListener('click', () => { document.body.requestPointerLock(); });
+
+document.addEventListener('mousemove', (e) => {
+    if (document.pointerLockElement === document.body) {
+        yaw -= e.movementX * 0.002;
+        pitch += e.movementY * 0.002;
+        pitch = Math.max(-85, Math.min(85, pitch)); // Clamp Up/Down
+    }
+});
+
 document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
 document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 
-// --- 4. MOBILE SPLIT-SCREEN LOGIC ---
+// Mobile: Split Screen Controls
 renderer.domElement.addEventListener('touchstart', (e) => {
-    e.preventDefault(); // STOPS BROWSER ZOOMING
+    e.preventDefault(); // Stop Browser Zoom
     const t = e.touches[0];
-    touchStartX = t.pageX;
-    touchStartY = t.pageY;
+    lastTouchX = t.pageX;
+    lastTouchY = t.pageY;
 
-    // Split Screen: Left 50% walks, Right 50% looks
+    // Left 50% = Walk, Right 50% = Look
     if (t.pageX < window.innerWidth / 2) {
-        isWalking = true;
+        isWalkingMobile = true;
     }
 }, { passive: false });
 
 renderer.domElement.addEventListener('touchmove', (e) => {
-    e.preventDefault(); // STOPS BROWSER ZOOMING
+    e.preventDefault(); 
     const t = e.touches[0];
-    
-    // Only the RIGHT side controls the camera
+
+    // Only Right Side rotates camera
     if (t.pageX > window.innerWidth / 2) {
-        const dx = t.pageX - touchStartX;
-        const dy = t.pageY - touchStartY;
-
-        yaw -= dx * 0.2; // Sensitivity
-        pitch += dy * 0.2;
-        pitch = Math.max(-85, Math.min(85, pitch)); // Prevent flipping
-
-        touchStartX = t.pageX;
-        touchStartY = t.pageY;
+        const dx = t.pageX - lastTouchX;
+        const dy = t.pageY - lastTouchY;
+        
+        yaw -= dx * 0.005; 
+        pitch += dy * 0.005;
+        pitch = Math.max(-85, Math.min(85, pitch));
+        
+        lastTouchX = t.pageX;
+        lastTouchY = t.pageY;
     }
 }, { passive: false });
 
-renderer.domElement.addEventListener('touchend', (e) => {
-    isWalking = false;
+renderer.domElement.addEventListener('touchend', () => {
+    isWalkingMobile = false;
 }, { passive: false });
 
-// --- 5. MODEL LOADING ---
+// --- 4. MODEL LOADING ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
@@ -107,37 +118,43 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
     scene.add(gltf.scene);
 });
 
-// --- 6. ANIMATION LOOP ---
+// --- 5. ANIMATION LOOP ---
 function animate() {
     requestAnimationFrame(animate);
 
-    const speed = 0.04;
+    // 1. Calculate Forward Direction based on current Yaw
+    const direction = new THREE.Vector3();
+    const speed = 0.08; // Adjust speed here
 
-    // Desktop Movement
-    if (controls.isLocked) {
-        if (keyStates['KeyW']) controls.moveForward(speed);
-        if (keyStates['KeyS']) controls.moveForward(-speed);
-        if (keyStates['KeyA']) controls.moveRight(-speed);
-        if (keyStates['KeyD']) controls.moveRight(speed);
-        if (keyStates['KeyE']) camera.position.y += speed;
-        if (keyStates['KeyQ']) camera.position.y -= speed;
-        // Sync desktop look to our system
-        yaw -= controls.getObject().rotation.y * 0.01; // placeholder logic
+    // 2. Handle Inputs
+    let moveForward = 0;
+    let moveSide = 0;
+
+    // Desktop WASD
+    if (keyStates['KeyW']) moveForward += 1;
+    if (keyStates['KeyS']) moveForward -= 1;
+    if (keyStates['KeyA']) moveSide -= 1;
+    if (keyStates['KeyD']) moveSide += 1;
+    
+    // Mobile Walk (Left Thumb)
+    if (isWalkingMobile) moveForward += 1;
+
+    // 3. Apply Movement
+    if (moveForward !== 0 || moveSide !== 0) {
+        // Calculate forward vector using only YAW (ignore Pitch so we don't fly into ground)
+        const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)); // Z is Cos, X is Sin
+        const right = new THREE.Vector3(Math.sin(yaw - Math.PI/2), 0, Math.cos(yaw - Math.PI/2));
+
+        camera.position.addScaledVector(forward, -moveForward * speed); // Inverted because Z is negative
+        camera.position.addScaledVector(right, -moveSide * speed);
     }
 
-    // Mobile Walk
-    if (isWalking && isMobile) {
-        const dir = new THREE.Vector3();
-        camera.getWorldDirection(dir);
-        dir.y = 0; // Keep on ground
-        dir.normalize();
-        camera.position.addScaledVector(dir, speed);
-    }
+    // 4. Height Controls (Q/E)
+    if (keyStates['KeyE']) camera.position.y += speed;
+    if (keyStates['KeyQ']) camera.position.y -= speed;
 
-    // ALWAYS force rotation to be horizon-locked
-    if (isMobile) {
-        updateCameraRotation();
-    }
+    // 5. Apply Rotation
+    updateCameraRotation();
 
     renderer.render(scene, camera);
 }
