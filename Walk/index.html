@@ -5,12 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>3D Apartment Tour</title>
     <style>
-        /* FIXED: touch-action: none prevents the 'pull-to-refresh' or scrolling on mobile */
-        body { margin: 0; overflow: hidden; background-color: #000; }
+        body { margin: 0; overflow: hidden; background-color: #e0e0e0; font-family: sans-serif; }
         canvas { display: block; touch-action: none; }
+
+        /* Loading Screen */
+        #loader {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #e0e0e0; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 100;
+            transition: opacity 0.5s ease;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid rgba(0,0,0,0.1);
+            border-top: 4px solid #444; border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* HUD Overlay Labels */
+        .hud-label {
+            position: fixed; bottom: 40px; width: 50%;
+            text-align: center; color: rgba(0, 0, 0, 0.3);
+            font-size: 12px; text-transform: uppercase;
+            letter-spacing: 2px; pointer-events: none; user-select: none;
+            z-index: 10;
+        }
+        #walk-label { left: 0; border-right: 1px solid rgba(0,0,0,0.05); }
+        #turn-label { right: 0; }
     </style>
 </head>
 <body>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <p style="margin-top: 20px; color: #444;">Loading Apartment...</p>
+    </div>
+
+    <div class="hud-label" id="walk-label">Hold to Walk</div>
+    <div class="hud-label" id="turn-label">Swipe to Turn</div>
 
     <script type="importmap">
         {
@@ -21,6 +53,6 @@
         }
     </script>
 
-    <script type="module" src="main.js?v=3"></script>
+    <script type="module" src="main.js?v=4"></script>
 </body>
 </html>
