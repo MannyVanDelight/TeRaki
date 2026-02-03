@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>3D Apartment Tour</title>
     <style>
-        /* This ensures the 3D scene takes up the whole screen */
-        body { margin: 0; overflow: hidden; }
-        canvas { display: block; }
+        /* FIXED: touch-action: none prevents the 'pull-to-refresh' or scrolling on mobile */
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; touch-action: none; }
     </style>
 </head>
 <body>
@@ -21,6 +21,6 @@
         }
     </script>
 
-    <script type="module" src="main.js"></script>
+    <script type="module" src="main.js?v=3"></script>
 </body>
 </html>
