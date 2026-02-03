@@ -8,7 +8,6 @@
         body { margin: 0; overflow: hidden; background-color: #e0e0e0; font-family: sans-serif; }
         canvas { display: block; touch-action: none; }
 
-        /* Loading Screen */
         #loader {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #e0e0e0; display: flex; flex-direction: column;
@@ -22,16 +21,24 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* HUD Overlay Labels */
+        /* HUD Labels */
         .hud-label {
             position: fixed; bottom: 40px; width: 50%;
             text-align: center; color: rgba(0, 0, 0, 0.3);
-            font-size: 12px; text-transform: uppercase;
-            letter-spacing: 2px; pointer-events: none; user-select: none;
-            z-index: 10;
+            font-size: 10px; text-transform: uppercase;
+            letter-spacing: 2px; pointer-events: none; z-index: 10;
         }
-        #walk-label { left: 0; border-right: 1px solid rgba(0,0,0,0.05); }
+        #walk-label { left: 0; }
         #turn-label { right: 0; }
+
+        /* Home Button */
+        #home-btn {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            padding: 10px 20px; background: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 20px;
+            color: #444; font-size: 12px; cursor: pointer; z-index: 20;
+            text-transform: uppercase; letter-spacing: 1px;
+        }
     </style>
 </head>
 <body>
@@ -41,8 +48,9 @@
         <p style="margin-top: 20px; color: #444;">Loading Apartment...</p>
     </div>
 
-    <div class="hud-label" id="walk-label">Hold to Walk</div>
-    <div class="hud-label" id="turn-label">Swipe to Turn</div>
+    <button id="home-btn">Reset View</button>
+    <div class="hud-label" id="walk-label">Hold Left to Walk</div>
+    <div class="hud-label" id="turn-label">Swipe Right to Turn</div>
 
     <script type="importmap">
         {
@@ -52,7 +60,6 @@
             }
         }
     </script>
-
-    <script type="module" src="main.js?v=4"></script>
+    <script type="module" src="main.js?v=5"></script>
 </body>
 </html>
