@@ -132,39 +132,42 @@ function animate() {
     requestAnimationFrame(animate);
     const speed = 0.05;
     let moveForward = 0, moveSide = 0;
+
+    // 1. Gather Inputs
     if (keyStates['KeyW']) moveForward += 1;
     if (keyStates['KeyS']) moveForward -= 1;
     if (keyStates['KeyA']) moveSide -= 1;
     if (keyStates['KeyD']) moveSide += 1;
     if (touchMode === 'WALK') moveForward += 1;
 
+    // 2. Process Movement
     if (moveForward !== 0 || moveSide !== 0) {
-        const forwardX = Math.sin(yaw), forwardZ = Math.cos(yaw);
-        const rightX = Math.sin(yaw - Math.PI/2), rightZ = Math.cos(yaw - Math.PI/2);
+        const forwardX = Math.sin(yaw);
+        const forwardZ = Math.cos(yaw);
+        const rightX = Math.sin(yaw - Math.PI / 2);
+        const rightZ = Math.cos(yaw - Math.PI / 2);
         
         // Calculate Potential New Position
+        // Note: Using += for forwardX/Z to match the "W = Forward" fix
         const nextX = camera.position.x + (forwardX * moveForward + rightX * moveSide) * speed;
         const nextZ = camera.position.z + (forwardZ * moveForward + rightZ * moveSide) * speed;
         
         const nextPos = new THREE.Vector3(nextX, camera.position.y, nextZ);
 
-        // ONLY MOVE IF NOT INSIDE THE CLIP BOX
-        if (!hasClipping || !clippingBox.containsPoint(nextPos)) {
+        // FIXED LOGIC: Move ONLY IF the position is INSIDE the clip box
+        // (Removed the '!' from clippingBox.containsPoint)
+        if (!hasClipping || clippingBox.containsPoint(nextPos)) {
             camera.position.x = nextX;
             camera.position.z = nextZ;
         }
     }
     
+    // 3. Vertical Controls
     if (keyStates['KeyE']) camera.position.y += speed;
     if (keyStates['KeyQ']) camera.position.y -= speed;
 
+    // 4. Update Camera and Render
     updateCameraRotation();
     renderer.render(scene, camera);
 }
 animate();
-
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
