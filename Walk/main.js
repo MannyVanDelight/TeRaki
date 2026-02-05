@@ -16,19 +16,17 @@ scene.background = new THREE.CanvasTexture(canvas);
 
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-// Placeholder initial position
-camera.position.set(0, 1.4, 8);
 let yaw = Math.PI; 
 let pitch = 0;
+const homeData = { pos: new THREE.Vector3(0, 1.4, 8), yaw: Math.PI };
+let clippingBox = new THREE.Box3(); // To store the 'clip' object boundaries
+let hasClipping = false;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 renderer.domElement.style.touchAction = 'none';
-
-// --- HOME POSITION LOGIC ---
-const homeData = { pos: new THREE.Vector3(0, 1.4, 8), yaw: Math.PI };
 
 function goHome() {
     camera.position.copy(homeData.pos);
@@ -41,7 +39,6 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
     goHome();
 });
 
-// --- 2. ROTATION ENGINE ---
 function updateCameraRotation() {
     const target = new THREE.Vector3();
     const forwardX = Math.sin(yaw) * Math.cos(pitch);
@@ -95,14 +92,21 @@ loader.setDRACOLoader(dracoLoader);
 
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     gltf.scene.traverse((child) => {
-        // Look for the special start object
+        // Find Start Position
         if (child.name.toLowerCase().includes("start")) {
             homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
-            // Extract the rotation from the object for the starting Yaw
             const worldQuat = child.getWorldQuaternion(new THREE.Quaternion());
             const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
-            homeData.yaw = euler.y + Math.PI; // Offset for our coordinate system
-            child.visible = false; // Hide the start marker itself
+            homeData.yaw = euler.y + Math.PI;
+            child.visible = false; 
+        }
+
+        // FIND CLIPPING OBJECT
+        if (child.name.toLowerCase().includes("clip")) {
+            child.geometry.computeBoundingBox();
+            clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+            child.visible = false; // Make it invisible as requested
+            hasClipping = true;
         }
         
         if (child.isMesh) {
@@ -117,7 +121,7 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
         }
     });
     scene.add(gltf.scene);
-    goHome(); // Teleport to the "start" object immediately
+    goHome();
 
     const loaderDiv = document.getElementById('loader');
     if(loaderDiv) { loaderDiv.style.opacity = '0'; setTimeout(() => loaderDiv.style.display = 'none', 500); }
@@ -137,9 +141,20 @@ function animate() {
     if (moveForward !== 0 || moveSide !== 0) {
         const forwardX = Math.sin(yaw), forwardZ = Math.cos(yaw);
         const rightX = Math.sin(yaw - Math.PI/2), rightZ = Math.cos(yaw - Math.PI/2);
-        camera.position.x += (forwardX * moveForward + rightX * moveSide) * speed;
-        camera.position.z += (forwardZ * moveForward + rightZ * moveSide) * speed;
+        
+        // Calculate Potential New Position
+        const nextX = camera.position.x + (forwardX * moveForward + rightX * moveSide) * speed;
+        const nextZ = camera.position.z + (forwardZ * moveForward + rightZ * moveSide) * speed;
+        
+        const nextPos = new THREE.Vector3(nextX, camera.position.y, nextZ);
+
+        // ONLY MOVE IF NOT INSIDE THE CLIP BOX
+        if (!hasClipping || !clippingBox.containsPoint(nextPos)) {
+            camera.position.x = nextX;
+            camera.position.z = nextZ;
+        }
     }
+    
     if (keyStates['KeyE']) camera.position.y += speed;
     if (keyStates['KeyQ']) camera.position.y -= speed;
 
