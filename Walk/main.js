@@ -4,6 +4,10 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
+const textureLoader = new THREE.TextureLoader();
+
+// Load the MatCap texture
+const matcapTexture = textureLoader.load('./material_look.jpg');
 
 // Professional Grey Gradient Background
 const canvas = document.createElement('canvas');
@@ -21,8 +25,6 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
-
-// Ensure mobile doesn't hijack our touch events
 renderer.domElement.style.touchAction = 'none';
 
 // --- 2. STATE & HOME LOGIC ---
@@ -46,14 +48,10 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
 // --- 3. INPUT HANDLING ---
 const keyStates = {};
 let touchMode = null; 
-let lastTouchX = 0;
-let lastTouchY = 0;
+let lastTouchX = 0, lastTouchY = 0;
 
-// Desktop Pointer Lock
 document.addEventListener('click', () => { 
-    if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        document.body.requestPointerLock();
-    }
+    if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) document.body.requestPointerLock();
 });
 
 document.addEventListener('mousemove', (e) => {
@@ -67,12 +65,10 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
 document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 
-// Mobile Controls
 renderer.domElement.addEventListener('touchstart', (e) => {
     e.preventDefault();
     const t = e.touches[0];
-    lastTouchX = t.pageX;
-    lastTouchY = t.pageY;
+    lastTouchX = t.pageX; lastTouchY = t.pageY;
     touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
 }, { passive: false });
 
@@ -83,14 +79,13 @@ renderer.domElement.addEventListener('touchmove', (e) => {
         yaw -= (t.pageX - lastTouchX) * 0.005;
         pitch -= (t.pageY - lastTouchY) * 0.005;
         pitch = Math.max(-1.5, Math.min(1.5, pitch));
-        lastTouchX = t.pageX;
-        lastTouchY = t.pageY;
+        lastTouchX = t.pageX; lastTouchY = t.pageY;
     }
 }, { passive: false });
 
 renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
 
-// --- 4. MODEL LOADING ---
+// --- 4. MODEL LOADING WITH MATCAP SWAP ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
@@ -98,39 +93,37 @@ loader.setDRACOLoader(dracoLoader);
 
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     gltf.scene.traverse((child) => {
-        // Handle START position
-        if (child.name.toLowerCase().includes("start")) {
+        const name = child.name.toLowerCase();
+
+        // 1. Handle START position
+        if (name.includes("start")) {
             homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
             const worldQuat = child.getWorldQuaternion(new THREE.Quaternion());
             const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
             homeData.yaw = euler.y + Math.PI;
             child.visible = false; 
+            return; // Skip material swap for this helper
         }
 
-        // Handle CLIP zone (The Walkable Bounds)
-        if (child.name.toLowerCase().includes("clip")) {
+        // 2. Handle CLIP zone
+        if (name.includes("clip")) {
             child.geometry.computeBoundingBox();
             clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
             child.visible = false; 
             hasClipping = true;
+            return; // Skip material swap for this helper
         }
         
-        // Optimize Materials
+        // 3. APPLY MATCAP to all visible geometry
         if (child.isMesh) {
-            child.material.emissive = new THREE.Color(0xffffff);
-            child.material.emissiveMap = child.material.map;
-            child.material.emissiveIntensity = 1.0;
-            if (child.material.map) {
-                child.material.transparent = true;
-                child.material.alphaTest = 0.5;
-                child.material.side = THREE.DoubleSide;
-            }
+            child.material = new THREE.MeshMatcapMaterial({
+                matcap: matcapTexture
+            });
         }
     });
     scene.add(gltf.scene);
     goHome();
 
-    // Fade out loader
     const loaderDiv = document.getElementById('loader');
     if(loaderDiv) {
         loaderDiv.style.opacity = '0';
@@ -153,29 +146,24 @@ function animate() {
     const speed = 0.05;
     let moveForward = 0, moveSide = 0;
 
-    // Inputs
     if (keyStates['KeyW']) moveForward += 1;
     if (keyStates['KeyS']) moveForward -= 1;
     if (keyStates['KeyA']) moveSide -= 1;
     if (keyStates['KeyD']) moveSide += 1;
     if (touchMode === 'WALK') moveForward += 1;
 
-    // Movement Processing
     if (moveForward !== 0 || moveSide !== 0) {
         const fX = Math.sin(yaw), fZ = Math.cos(yaw);
         const rX = Math.sin(yaw - Math.PI / 2), rZ = Math.cos(yaw - Math.PI / 2);
-        
         const nextX = camera.position.x + (fX * moveForward + rX * moveSide) * speed;
         const nextZ = camera.position.z + (fZ * moveForward + rZ * moveSide) * speed;
         const nextPos = new THREE.Vector3(nextX, camera.position.y, nextZ);
 
-        // Boundary Check
         if (!hasClipping || clippingBox.containsPoint(nextPos)) {
             camera.position.x = nextX;
             camera.position.z = nextZ;
         }
     }
-
     updateCameraRotation();
     renderer.render(scene, camera);
 }
