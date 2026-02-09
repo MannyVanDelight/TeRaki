@@ -4,12 +4,8 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
-const textureLoader = new THREE.TextureLoader();
 
-// Load the MatCap texture
-const matcapTexture = textureLoader.load('./material_look.jpg');
-
-// Professional Grey Gradient Background
+// High-end Gradient Background (Grey to Dark Grey)
 const canvas = document.createElement('canvas');
 canvas.width = 2; canvas.height = 512;
 const context = canvas.getContext('2d');
@@ -23,21 +19,21 @@ scene.background = new THREE.CanvasTexture(canvas);
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+// IMPORTANT FOR BAKED TEXTURES:
+// sRGB ensures the colors you see in Blender match the browser.
+renderer.outputColorSpace = THREE.SRGBColorSpace; 
 document.body.appendChild(renderer.domElement);
 renderer.domElement.style.touchAction = 'none';
 
 // --- 2. STATE & HOME LOGIC ---
-let yaw = Math.PI; 
-let pitch = 0;
+let yaw = Math.PI, pitch = 0;
 const homeData = { pos: new THREE.Vector3(0, 1.4, 8), yaw: Math.PI };
-let clippingBox = new THREE.Box3(); 
-let hasClipping = false;
+let clippingBox = new THREE.Box3(), hasClipping = false;
 
 function goHome() {
     camera.position.copy(homeData.pos);
-    yaw = homeData.yaw;
-    pitch = 0;
+    yaw = homeData.yaw; pitch = 0;
 }
 
 document.getElementById('home-btn').addEventListener('click', (e) => {
@@ -47,13 +43,11 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
 
 // --- 3. INPUT HANDLING ---
 const keyStates = {};
-let touchMode = null; 
-let lastTouchX = 0, lastTouchY = 0;
+let touchMode = null, lastTouchX = 0, lastTouchY = 0;
 
 document.addEventListener('click', () => { 
     if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) document.body.requestPointerLock();
 });
-
 document.addEventListener('mousemove', (e) => {
     if (document.pointerLockElement === document.body) {
         yaw -= e.movementX * 0.002;
@@ -61,7 +55,6 @@ document.addEventListener('mousemove', (e) => {
         pitch = Math.max(-1.5, Math.min(1.5, pitch));
     }
 });
-
 document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
 document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 
@@ -85,83 +78,86 @@ renderer.domElement.addEventListener('touchmove', (e) => {
 
 renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
 
-// --- 4. MODEL LOADING WITH MATCAP SWAP ---
+// --- 4. MODEL LOADING (BAKED MATERIALS) ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 
-loader.load('./models/TeRaki-05.glb', (gltf) => {
+// Function to handle the specific logic for each model
+function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
 
-        // 1. Handle START position
-        if (name.includes("start")) {
-            homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
-            const worldQuat = child.getWorldQuaternion(new THREE.Quaternion());
-            const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
-            homeData.yaw = euler.y + Math.PI;
-            child.visible = false; 
-            return; // Skip material swap for this helper
+        if (isMain) {
+            if (name.includes("start")) {
+                homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
+                const worldQuat = child.getWorldQuaternion(new THREE.Quaternion());
+                const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
+                homeData.yaw = euler.y + Math.PI;
+                child.visible = false;
+                return;
+            }
+            if (name.includes("clip")) {
+                child.geometry.computeBoundingBox();
+                clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+                child.visible = false; hasClipping = true;
+                return;
+            }
         }
 
-        // 2. Handle CLIP zone
-        if (name.includes("clip")) {
-            child.geometry.computeBoundingBox();
-            clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
-            child.visible = false; 
-            hasClipping = true;
-            return; // Skip material swap for this helper
-        }
-        
-        // 3. APPLY MATCAP to all visible geometry
         if (child.isMesh) {
-            child.material = new THREE.MeshMatcapMaterial({
-                matcap: matcapTexture
-            });
+            // For baked lighting, we often want the material to be slightly "emissive" 
+            // so it doesn't look pitch black without scene lights.
+            if (child.material.map) {
+                child.material.emissive = new THREE.Color(0xffffff);
+                child.material.emissiveMap = child.material.map;
+                child.material.emissiveIntensity = 1.0; 
+                // This makes the bake look "lit" as it did in Blender
+            }
         }
     });
     scene.add(gltf.scene);
-    goHome();
+    if (isMain) goHome();
+}
 
-    const loaderDiv = document.getElementById('loader');
-    if(loaderDiv) {
-        loaderDiv.style.opacity = '0';
-        setTimeout(() => loaderDiv.style.display = 'none', 500);
-    }
+// Load Main Apartment
+loader.load('./models/TeRaki-05.glb', (gltf) => {
+    processModel(gltf, true);
+    document.getElementById('loader').style.opacity = '0';
+    setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
+});
+
+// Load Background
+loader.load('./models/bg01.glb', (gltf) => {
+    processModel(gltf, false);
 });
 
 // --- 5. ANIMATION & MOVEMENT ---
 function updateCameraRotation() {
     const target = new THREE.Vector3();
-    const forwardX = Math.sin(yaw) * Math.cos(pitch);
-    const forwardY = Math.sin(pitch);
-    const forwardZ = Math.cos(yaw) * Math.cos(pitch);
-    target.set(camera.position.x + forwardX, camera.position.y + forwardY, camera.position.z + forwardZ);
+    const fX = Math.sin(yaw) * Math.cos(pitch), fY = Math.sin(pitch), fZ = Math.cos(yaw) * Math.cos(pitch);
+    target.set(camera.position.x + fX, camera.position.y + fY, camera.position.z + fZ);
     camera.lookAt(target);
 }
 
 function animate() {
     requestAnimationFrame(animate);
     const speed = 0.05;
-    let moveForward = 0, moveSide = 0;
+    let moveF = 0, moveS = 0;
 
-    if (keyStates['KeyW']) moveForward += 1;
-    if (keyStates['KeyS']) moveForward -= 1;
-    if (keyStates['KeyA']) moveSide -= 1;
-    if (keyStates['KeyD']) moveSide += 1;
-    if (touchMode === 'WALK') moveForward += 1;
+    if (keyStates['KeyW'] || touchMode === 'WALK') moveF += 1;
+    if (keyStates['KeyS']) moveF -= 1;
+    if (keyStates['KeyA']) moveS -= 1;
+    if (keyStates['KeyD']) moveS += 1;
 
-    if (moveForward !== 0 || moveSide !== 0) {
+    if (moveF !== 0 || moveS !== 0) {
         const fX = Math.sin(yaw), fZ = Math.cos(yaw);
         const rX = Math.sin(yaw - Math.PI / 2), rZ = Math.cos(yaw - Math.PI / 2);
-        const nextX = camera.position.x + (fX * moveForward + rX * moveSide) * speed;
-        const nextZ = camera.position.z + (fZ * moveForward + rZ * moveSide) * speed;
-        const nextPos = new THREE.Vector3(nextX, camera.position.y, nextZ);
-
-        if (!hasClipping || clippingBox.containsPoint(nextPos)) {
-            camera.position.x = nextX;
-            camera.position.z = nextZ;
+        const nX = camera.position.x + (fX * moveF + rX * moveS) * speed;
+        const nZ = camera.position.z + (fZ * moveF + rZ * moveS) * speed;
+        if (!hasClipping || clippingBox.containsPoint(new THREE.Vector3(nX, camera.position.y, nZ))) {
+            camera.position.x = nX; camera.position.z = nZ;
         }
     }
     updateCameraRotation();
