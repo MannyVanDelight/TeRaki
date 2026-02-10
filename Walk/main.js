@@ -82,28 +82,28 @@ renderer.domElement.addEventListener('touchmove', (e) => {
 renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
 
 // --- 4. MODEL LOADING ---
-import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 
-// Setup Loaders
+// 1. Initialize the loaders
+// Note: We use lowercase 'rgbeLoader' to avoid conflict with the Class name 'RGBELoader'
+const rgbeLoader = new RGBELoader();
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
-const rgbeLoader = new RGBELoader();
 
-// 1. Load HDR (Wrapped in a try/catch style check)
-rgbeLoader.load('https://threejs.org/examples/textures/equirectangular/venice_sunset_1k.hdr', 
-    (texture) => {
-        texture.mapping = THREE.EquirectangularReflectionMapping;
-        scene.environment = texture;
-    },
-    undefined, 
-    (err) => console.error("HDR failed to load, but continuing...")
-);
+// 2. Load the Environment (HDR)
+// This provides the PBR lighting and reflections
+rgbeLoader.load('https://threejs.org/examples/textures/equirectangular/venice_sunset_1k.hdr', (texture) => {
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    scene.environment = texture;
+    // scene.background = texture; // Uncomment if you want to see the sky
+});
 
+// 3. The Processing Function
 function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
+
         if (isMain) {
             if (name.includes("start")) {
                 homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
@@ -121,39 +121,36 @@ function processModel(gltf, isMain) {
                 return;
             }
         }
+        
+        // Ensure materials react to the HDR
+        if (child.isMesh && child.material) {
+            child.material.envMapIntensity = 1.0; 
+        }
     });
     scene.add(gltf.scene);
     if (isMain) goHome();
 }
 
-// 2. Load Main Apartment
-loader.load('./models/TeRaki-05.glb', 
-    (gltf) => {
-        console.log("Main model loaded");
-        processModel(gltf, true);
-        
-        // HIDE LOADER IMMEDIATELY ONCE MAIN IS DONE
-        const loaderDiv = document.getElementById('loader');
-        if(loaderDiv) {
-            loaderDiv.style.opacity = '0';
-            setTimeout(() => loaderDiv.style.display = 'none', 500);
-        }
-    },
-    (xhr) => { console.log((xhr.loaded / xhr.total * 100) + '% loaded'); },
-    (err) => { 
-        console.error("Error loading main model:", err);
-        alert("Could not find TeRaki-05.glb in /models/");
+// 4. Load the Main Model
+loader.load('./models/TeRaki-05.glb', (gltf) => {
+    processModel(gltf, true);
+    
+    // Hide the loading screen
+    const loaderDiv = document.getElementById('loader');
+    if(loaderDiv) {
+        loaderDiv.style.opacity = '0';
+        setTimeout(() => loaderDiv.style.display = 'none', 500);
     }
-);
+}, undefined, (error) => {
+    console.error("Error loading TeRaki-05.glb:", error);
+});
 
-// 3. Load Background
-loader.load('./models/bg01.glb', 
-    (gltf) => {
-        processModel(gltf, false);
-    },
-    undefined,
-    (err) => console.warn("bg01.glb not found, skipping background.")
-);
+// 5. Load the Background
+loader.load('./models/bg01.glb', (gltf) => {
+    processModel(gltf, false);
+}, undefined, (error) => {
+    console.warn("bg01.glb not found, skipping background.");
+});
 
 // --- 5. ANIMATION & MOVEMENT ---
 function updateCameraRotation() {
