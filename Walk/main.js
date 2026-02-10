@@ -19,6 +19,8 @@ scene.background = new THREE.CanvasTexture(canvas);
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0; // Adjust this if the scene is too dark/bright
 
 // IMPORTANT FOR BAKED TEXTURES:
 // sRGB ensures the colors you see in Blender match the browser.
@@ -78,13 +80,23 @@ renderer.domElement.addEventListener('touchmove', (e) => {
 
 renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
 
-// --- 4. MODEL LOADING (BAKED MATERIALS) ---
+// --- 4. MODEL LOADING (PBR WORKFLOW) ---
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+
+// 4a. Load the HDR Environment Map
+const rgbeLoader = new RGBELoader();
+// You can replace this URL with your own local .hdr file later
+rgbeLoader.load('https://threejs.org/examples/textures/equirectangular/venice_sunset_1k.hdr', (texture) => {
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    scene.environment = texture; 
+    // scene.background = texture; // Uncomment if you want to see the HDR sky
+});
+
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 
-// Function to handle the specific logic for each model
 function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
@@ -107,13 +119,12 @@ function processModel(gltf, isMain) {
         }
 
         if (child.isMesh) {
-            // For baked lighting, we often want the material to be slightly "emissive" 
-            // so it doesn't look pitch black without scene lights.
-            if (child.material.map) {
-                child.material.emissive = new THREE.Color(0xffffff);
-                child.material.emissiveMap = child.material.map;
-                child.material.emissiveIntensity = 1.0; 
-                // This makes the bake look "lit" as it did in Blender
+            // PBR CLEANUP: 
+            // We remove the emissive hacks so the HDR can do the work.
+            // We also ensure the material reacts properly to the environment.
+            if (child.material) {
+                child.material.envMapIntensity = 1.0; // Controls strength of reflections
+                child.material.needsUpdate = true;
             }
         }
     });
@@ -124,8 +135,11 @@ function processModel(gltf, isMain) {
 // Load Main Apartment
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     processModel(gltf, true);
-    document.getElementById('loader').style.opacity = '0';
-    setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
+    const loaderDiv = document.getElementById('loader');
+    if(loaderDiv) {
+        loaderDiv.style.opacity = '0';
+        setTimeout(() => loaderDiv.style.display = 'none', 500);
+    }
 });
 
 // Load Background
