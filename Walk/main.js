@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
@@ -20,8 +19,6 @@ scene.background = new THREE.CanvasTexture(canvas);
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0; // Adjust this if the scene is too dark/bright
 
 // IMPORTANT FOR BAKED TEXTURES:
 // sRGB ensures the colors you see in Blender match the browser.
@@ -81,25 +78,13 @@ renderer.domElement.addEventListener('touchmove', (e) => {
 
 renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
 
-// --- 4. MODEL LOADING ---
-
-// 1. Initialize the loaders
-// Note: We use lowercase 'rgbeLoader' to avoid conflict with the Class name 'RGBELoader'
-const rgbeLoader = new RGBELoader();
+// --- 4. MODEL LOADING (BAKED MATERIALS) ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 
-// 2. Load the Environment (HDR)
-// This provides the PBR lighting and reflections
-rgbeLoader.load('https://threejs.org/examples/textures/equirectangular/venice_sunset_1k.hdr', (texture) => {
-    texture.mapping = THREE.EquirectangularReflectionMapping;
-    scene.environment = texture;
-    // scene.background = texture; // Uncomment if you want to see the sky
-});
-
-// 3. The Processing Function
+// Function to handle the specific logic for each model
 function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
@@ -116,40 +101,36 @@ function processModel(gltf, isMain) {
             if (name.includes("clip")) {
                 child.geometry.computeBoundingBox();
                 clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
-                child.visible = false; 
-                hasClipping = true;
+                child.visible = false; hasClipping = true;
                 return;
             }
         }
-        
-        // Ensure materials react to the HDR
-        if (child.isMesh && child.material) {
-            child.material.envMapIntensity = 1.0; 
+
+        if (child.isMesh) {
+            // For baked lighting, we often want the material to be slightly "emissive" 
+            // so it doesn't look pitch black without scene lights.
+            if (child.material.map) {
+                child.material.emissive = new THREE.Color(0xffffff);
+                child.material.emissiveMap = child.material.map;
+                child.material.emissiveIntensity = 1.0; 
+                // This makes the bake look "lit" as it did in Blender
+            }
         }
     });
     scene.add(gltf.scene);
     if (isMain) goHome();
 }
 
-// 4. Load the Main Model
+// Load Main Apartment
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     processModel(gltf, true);
-    
-    // Hide the loading screen
-    const loaderDiv = document.getElementById('loader');
-    if(loaderDiv) {
-        loaderDiv.style.opacity = '0';
-        setTimeout(() => loaderDiv.style.display = 'none', 500);
-    }
-}, undefined, (error) => {
-    console.error("Error loading TeRaki-05.glb:", error);
+    document.getElementById('loader').style.opacity = '0';
+    setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
 });
 
-// 5. Load the Background
+// Load Background
 loader.load('./models/bg01.glb', (gltf) => {
     processModel(gltf, false);
-}, undefined, (error) => {
-    console.warn("bg01.glb not found, skipping background.");
 });
 
 // --- 5. ANIMATION & MOVEMENT ---
