@@ -80,25 +80,29 @@ renderer.domElement.addEventListener('touchmove', (e) => {
 
 renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
 
-// --- 4. MODEL LOADING (HYBRID BAKED + PBR) ---
+// --- 4. MODEL LOADING ---
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 
-const rgbeLoader = new RGBELoader();
-rgbeLoader.load('https://threejs.org/examples/textures/equirectangular/venice_sunset_1k.hdr', (texture) => {
-    texture.mapping = THREE.EquirectangularReflectionMapping;
-    scene.environment = texture; 
-});
-
+// Setup Loaders
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
+const rgbeLoader = new RGBELoader();
+
+// 1. Load HDR (Wrapped in a try/catch style check)
+rgbeLoader.load('https://threejs.org/examples/textures/equirectangular/venice_sunset_1k.hdr', 
+    (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        scene.environment = texture;
+    },
+    undefined, 
+    (err) => console.error("HDR failed to load, but continuing...")
+);
 
 function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
-
-        // Helpers... (Start/Clip logic remains same)
         if (isMain) {
             if (name.includes("start")) {
                 homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
@@ -111,27 +115,44 @@ function processModel(gltf, isMain) {
             if (name.includes("clip")) {
                 child.geometry.computeBoundingBox();
                 clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
-                child.visible = false; hasClipping = true;
+                child.visible = false; 
+                hasClipping = true;
                 return;
-            }
-        }
-
-        if (child.isMesh) {
-            // THE HYBRID FIX:
-            // We use your bake as the "Base Color" but keep it a Standard Material
-            // so it can still receive reflections from the HDR.
-            if (child.material.map) {
-                // If you baked lighting, we don't want Three.js to add NEW shadows,
-                // we just want it to show your bake and add reflections.
-                child.material.envMapIntensity = 0.5; // Subtle reflections
-                child.material.roughness = 0.2;       // Makes it "glossy"
-                child.material.metalness = 0.5;       // Makes it "reflective"
             }
         }
     });
     scene.add(gltf.scene);
     if (isMain) goHome();
 }
+
+// 2. Load Main Apartment
+loader.load('./models/TeRaki-05.glb', 
+    (gltf) => {
+        console.log("Main model loaded");
+        processModel(gltf, true);
+        
+        // HIDE LOADER IMMEDIATELY ONCE MAIN IS DONE
+        const loaderDiv = document.getElementById('loader');
+        if(loaderDiv) {
+            loaderDiv.style.opacity = '0';
+            setTimeout(() => loaderDiv.style.display = 'none', 500);
+        }
+    },
+    (xhr) => { console.log((xhr.loaded / xhr.total * 100) + '% loaded'); },
+    (err) => { 
+        console.error("Error loading main model:", err);
+        alert("Could not find TeRaki-05.glb in /models/");
+    }
+);
+
+// 3. Load Background
+loader.load('./models/bg01.glb', 
+    (gltf) => {
+        processModel(gltf, false);
+    },
+    undefined,
+    (err) => console.warn("bg01.glb not found, skipping background.")
+);
 
 // --- 5. ANIMATION & MOVEMENT ---
 function updateCameraRotation() {
