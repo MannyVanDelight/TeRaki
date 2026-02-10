@@ -80,16 +80,13 @@ renderer.domElement.addEventListener('touchmove', (e) => {
 
 renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
 
-// --- 4. MODEL LOADING (PBR WORKFLOW) ---
+// --- 4. MODEL LOADING (HYBRID BAKED + PBR) ---
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 
-// 4a. Load the HDR Environment Map
 const rgbeLoader = new RGBELoader();
-// You can replace this URL with your own local .hdr file later
 rgbeLoader.load('https://threejs.org/examples/textures/equirectangular/venice_sunset_1k.hdr', (texture) => {
     texture.mapping = THREE.EquirectangularReflectionMapping;
     scene.environment = texture; 
-    // scene.background = texture; // Uncomment if you want to see the HDR sky
 });
 
 const dracoLoader = new DRACOLoader();
@@ -101,6 +98,7 @@ function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
 
+        // Helpers... (Start/Clip logic remains same)
         if (isMain) {
             if (name.includes("start")) {
                 homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
@@ -119,33 +117,21 @@ function processModel(gltf, isMain) {
         }
 
         if (child.isMesh) {
-            // PBR CLEANUP: 
-            // We remove the emissive hacks so the HDR can do the work.
-            // We also ensure the material reacts properly to the environment.
-            if (child.material) {
-                child.material.envMapIntensity = 1.0; // Controls strength of reflections
-                child.material.needsUpdate = true;
+            // THE HYBRID FIX:
+            // We use your bake as the "Base Color" but keep it a Standard Material
+            // so it can still receive reflections from the HDR.
+            if (child.material.map) {
+                // If you baked lighting, we don't want Three.js to add NEW shadows,
+                // we just want it to show your bake and add reflections.
+                child.material.envMapIntensity = 0.5; // Subtle reflections
+                child.material.roughness = 0.2;       // Makes it "glossy"
+                child.material.metalness = 0.5;       // Makes it "reflective"
             }
         }
     });
     scene.add(gltf.scene);
     if (isMain) goHome();
 }
-
-// Load Main Apartment
-loader.load('./models/TeRaki-05.glb', (gltf) => {
-    processModel(gltf, true);
-    const loaderDiv = document.getElementById('loader');
-    if(loaderDiv) {
-        loaderDiv.style.opacity = '0';
-        setTimeout(() => loaderDiv.style.display = 'none', 500);
-    }
-});
-
-// Load Background
-loader.load('./models/bg01.glb', (gltf) => {
-    processModel(gltf, false);
-});
 
 // --- 5. ANIMATION & MOVEMENT ---
 function updateCameraRotation() {
