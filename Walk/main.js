@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
@@ -19,6 +20,8 @@ scene.background = new THREE.CanvasTexture(canvas);
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0; // Adjust this if the scene is too dark/bright
 
 // IMPORTANT FOR BAKED TEXTURES:
 // sRGB ensures the colors you see in Blender match the browser.
@@ -107,13 +110,13 @@ function processModel(gltf, isMain) {
         }
 
         if (child.isMesh) {
-            // For baked lighting, we often want the material to be slightly "emissive" 
-            // so it doesn't look pitch black without scene lights.
+            // APPLY BAKE LOGIC: Keep the lighting you baked in Blender
             if (child.material.map) {
                 child.material.emissive = new THREE.Color(0xffffff);
                 child.material.emissiveMap = child.material.map;
                 child.material.emissiveIntensity = 1.0; 
-                // This makes the bake look "lit" as it did in Blender
+                // Optional: set base color to black to prevent "double lighting"
+                child.material.color = new THREE.Color(0x000000);
             }
         }
     });
@@ -121,14 +124,24 @@ function processModel(gltf, isMain) {
     if (isMain) goHome();
 }
 
-// Load Main Apartment
+// 1. Load Main Apartment
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     processModel(gltf, true);
-    document.getElementById('loader').style.opacity = '0';
-    setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
+    
+    // Hide the loader only after the main structure is ready
+    const loaderDiv = document.getElementById('loader');
+    if(loaderDiv) {
+        loaderDiv.style.opacity = '0';
+        setTimeout(() => loaderDiv.style.display = 'none', 500);
+    }
 });
 
-// Load Background
+// 2. Load Furniture
+loader.load('./models/furniture01.glb', (gltf) => {
+    processModel(gltf, false);
+});
+
+// 3. Load Background
 loader.load('./models/bg01.glb', (gltf) => {
     processModel(gltf, false);
 });
