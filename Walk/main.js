@@ -7,7 +7,7 @@ import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerM
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
 
-// Background Gradient
+// Gradient Background
 const canvas = document.createElement('canvas');
 canvas.width = 2; canvas.height = 512;
 const context = canvas.getContext('2d');
@@ -28,9 +28,13 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace; 
 renderer.xr.enabled = true;
+
+// Prevent selection and blue highlights on mobile
+renderer.domElement.style.userSelect = 'none';
+renderer.domElement.style.webkitUserSelect = 'none';
+renderer.domElement.style.touchAction = 'none';
 document.body.appendChild(renderer.domElement);
 
-// VR Button Position Offset
 const vrBtn = VRButton.createButton(renderer);
 vrBtn.style.bottom = '30px';
 vrBtn.style.right = '30px';
@@ -46,15 +50,14 @@ let hasClipping = false;
 
 function goHome() {
     if (renderer.xr.isPresenting) {
-        // VR: X and Z from 'start', Y from 'floor'
         cameraRig.position.set(homeData.pos.x, vrFloorY, homeData.pos.z);
         cameraRig.rotation.y = homeData.yaw;
     } else {
-        // Desktop/Mobile: Exact coordinates from 'start'
         camera.position.copy(homeData.pos);
         cameraRig.position.set(0, 0, 0); 
         cameraRig.rotation.set(0, 0, 0);
-        yaw = homeData.yaw;
+        // Apply the 180 degree rotation here
+        yaw = homeData.yaw + Math.PI; 
         pitch = 0;
     }
 }
@@ -84,10 +87,6 @@ controller1.addEventListener('selectstart', () => {
 });
 cameraRig.add(controller1);
 
-const grip1 = renderer.xr.getControllerGrip(0);
-grip1.add(controllerModelFactory.createControllerModel(grip1));
-cameraRig.add(grip1);
-
 // --- 4. ASSET LOADING ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
@@ -98,7 +97,6 @@ function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
         if (isMain) {
-            // OBJECT A: START (Anchor for position and rotation)
             if (name.includes("start")) {
                 homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
                 const worldQuat = child.getWorldQuaternion(new THREE.Quaternion());
@@ -106,7 +104,6 @@ function processModel(gltf, isMain) {
                 homeData.yaw = euler.y;
                 child.visible = false;
             }
-            // OBJECT B: CLIP (Movement boundary for non-VR)
             if (name.includes("clip")) {
                 child.geometry.computeBoundingBox();
                 child.updateMatrixWorld();
@@ -114,7 +111,6 @@ function processModel(gltf, isMain) {
                 if(child.material) child.material.visible = false; 
                 hasClipping = true;
             }
-            // OBJECT C: FLOOR (VR Height and VR Teleport target)
             if (name.includes("floor")) {
                 const worldPos = child.getWorldPosition(new THREE.Vector3());
                 vrFloorY = worldPos.y; 
@@ -122,7 +118,6 @@ function processModel(gltf, isMain) {
                 if(child.material) child.material.visible = false; 
             }
         }
-        // Baked Texture Logic
         if (child.isMesh && child.material && child.material.map) {
             child.material.emissive = new THREE.Color(0xffffff);
             child.material.emissiveMap = child.material.map;
@@ -134,20 +129,14 @@ function processModel(gltf, isMain) {
     if (isMain) goHome();
 }
 
-loader.load('./models/TeRaki-05.glb', (gltf) => {
-    processModel(gltf, true);
-    const loaderDiv = document.getElementById('loader');
-    if(loaderDiv) {
-        loaderDiv.style.opacity = '0';
-        setTimeout(() => loaderDiv.style.display = 'none', 500);
-    }
-});
+loader.load('./models/TeRaki-05.glb', (gltf) => processModel(gltf, true));
 loader.load('./models/furniture01.glb', (gltf) => processModel(gltf, false));
 loader.load('./models/bg01.glb', (gltf) => processModel(gltf, false));
 
-// --- 5. MOVEMENT & ANIMATION ---
+// --- 5. MOVEMENT LOGIC ---
 const keyStates = {};
 let touchMode = null, lastTouchX = 0, lastTouchY = 0;
+let mobileMoveY = 0; // New: Tracks swipe for forward/back
 
 function updateCameraRotation() {
     const target = new THREE.Vector3();
@@ -160,62 +149,59 @@ function updateCameraRotation() {
 
 function animate() {
     if (renderer.xr.isPresenting) {
-        // VR Teleportation: Strictly raycasting against the 'floor' object
+        // VR Teleport Logic
         const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
         raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
         raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
         const intersects = raycaster.intersectObjects(scene.children, true);
         const validHit = intersects.find(hit => hit.object.userData.isVRFloor);
-        
         if (validHit && validHit.face.normal.y > 0.5) {
             intersectPoint = validHit.point;
             marker.position.copy(intersectPoint);
             marker.visible = true;
-        } else {
-            marker.visible = false;
-        }
+        } else { marker.visible = false; }
     } else {
-        // Desktop/Mobile Movement (0.025 speed)
+        // Desktop/Mobile Movement
         const speed = 0.025;
         let moveF = 0, moveS = 0;
-        if (keyStates['KeyW'] || touchMode === 'WALK') moveF += 1;
+
+        // Desktop
+        if (keyStates['KeyW']) moveF += 1;
         if (keyStates['KeyS']) moveF -= 1;
         if (keyStates['KeyA']) moveS -= 1;
         if (keyStates['KeyD']) moveS += 1;
 
+        // Mobile (Swipe Up/Down on left side)
+        if (touchMode === 'WALK') {
+            if (mobileMoveY > 10) moveF += 1;
+            if (mobileMoveY < -10) moveF -= 1;
+        }
+
         if (moveF !== 0 || moveS !== 0) {
             const fX = Math.sin(yaw), fZ = Math.cos(yaw);
-            const rX = Math.sin(yaw + Math.PI / 2), rZ = Math.cos(yaw + Math.PI / 2);
+            const rX = Math.sin(yaw - Math.PI / 2), rZ = Math.cos(yaw - Math.PI / 2); // Restored original strafe
             const nX = camera.position.x + (fX * moveF + rX * moveS) * speed;
             const nZ = camera.position.z + (fZ * moveF + rZ * moveS) * speed;
 
-            // Collision check against the 'clip' object's box
             if (!hasClipping || clippingBox.containsPoint(new THREE.Vector3(nX, camera.position.y, nZ))) {
-                camera.position.x = nX;
-                camera.position.z = nZ;
+                camera.position.x = nX; camera.position.z = nZ;
             }
         }
         updateCameraRotation();
     }
     renderer.render(scene, camera);
 }
-
 renderer.setAnimationLoop(animate);
 
-// --- 6. HANDLERS & RESIZE ---
-function onWindowResize() {
+// --- 6. EVENT LISTENERS ---
+window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-}
-window.addEventListener('resize', onWindowResize);
-
-renderer.xr.addEventListener('sessionend', () => {
-    goHome();
-    setTimeout(onWindowResize, 150);
 });
 
-// Input Listeners
+renderer.xr.addEventListener('sessionend', () => { goHome(); });
+
 document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
 document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
 document.addEventListener('mousemove', (e) => {
@@ -226,23 +212,34 @@ document.addEventListener('mousemove', (e) => {
     }
 });
 
-// Mobile Touch
+// Improved Mobile Touch
 renderer.domElement.addEventListener('touchstart', (e) => {
-    if (renderer.xr.isPresenting) return;
+    e.preventDefault();
     const t = e.touches[0];
     lastTouchX = t.pageX; lastTouchY = t.pageY;
+    mobileMoveY = 0; 
     touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
 }, { passive: false });
 
 renderer.domElement.addEventListener('touchmove', (e) => {
-    if (renderer.xr.isPresenting) return;
+    e.preventDefault();
     const t = e.touches[0];
+    const deltaX = t.pageX - lastTouchX;
+    const deltaY = t.pageY - lastTouchY;
+
     if (touchMode === 'LOOK') {
-        yaw -= (t.pageX - lastTouchX) * 0.005;
-        pitch -= (t.pageY - lastTouchY) * 0.005;
+        yaw -= deltaX * 0.005;
+        pitch -= deltaY * 0.005;
         pitch = Math.max(-1.5, Math.min(1.5, pitch));
+    } else if (touchMode === 'WALK') {
+        // Inverse Y delta for intuitive "Swipe Up = Forward"
+        mobileMoveY = -deltaY; 
     }
     lastTouchX = t.pageX; lastTouchY = t.pageY;
 }, { passive: false });
 
-renderer.domElement.addEventListener('touchend', () => { touchMode = null; });
+renderer.domElement.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    touchMode = null;
+    mobileMoveY = 0;
+}, { passive: false });
