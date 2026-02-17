@@ -6,10 +6,23 @@ import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerM
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
+
+// Restore Gradient Background
+const canvas = document.createElement('canvas');
+canvas.width = 2; canvas.height = 512;
+const context = canvas.getContext('2d');
+const gradient = context.createLinearGradient(0, 0, 0, 512);
+gradient.addColorStop(0, '#e0e0e0'); 
+gradient.addColorStop(1, '#444444'); 
+context.fillStyle = gradient;
+context.fillRect(0, 0, 2, 512);
+scene.background = new THREE.CanvasTexture(canvas);
+
 const cameraRig = new THREE.Group();
 scene.add(cameraRig);
 
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 1.6, 0); // Desktop height
 cameraRig.add(camera);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -28,6 +41,7 @@ let clippingBox = new THREE.Box3();
 let hasClipping = false;
 let intersectPoint = null;
 const keyStates = {};
+let touchMode = null, lastTouchX = 0, lastTouchY = 0;
 
 // --- 3. LOADERS ---
 const dracoLoader = new DRACOLoader();
@@ -35,7 +49,7 @@ dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 
-// --- 4. VR CONTROLLERS & TELEPORT ---
+// --- 4. VR CONTROLLERS & MODELS ---
 const raycaster = new THREE.Raycaster();
 const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
@@ -50,14 +64,24 @@ controller1.addEventListener('selectstart', () => {
 });
 cameraRig.add(controller1);
 
-// --- 5. FUNCTIONS ---
+const controllerModelFactory = new XRControllerModelFactory();
+const grip1 = renderer.xr.getControllerGrip(0);
+grip1.add(controllerModelFactory.createControllerModel(grip1));
+cameraRig.add(grip1);
 
+// --- 5. FUNCTIONS ---
 function goHome() {
     cameraRig.position.copy(homeData.pos);
     yaw = homeData.yaw; 
     pitch = 0;
-    camera.position.set(0, 1.6, 0); // Eye level
-    camera.rotation.set(0,0,0);
+    if (!renderer.xr.isPresenting) {
+        camera.position.set(0, 1.6, 0);
+    } else {
+        camera.position.set(0, 0, 0);
+    }
+    // Update rotations to match the home yaw
+    cameraRig.rotation.y = yaw;
+    camera.rotation.x = pitch;
 }
 
 function processModel(gltf, isMain) {
@@ -102,7 +126,7 @@ function processModel(gltf, isMain) {
 // --- 6. ANIMATION LOOP ---
 renderer.setAnimationLoop(() => {
     if (renderer.xr.isPresenting) {
-        // VR Teleport Logic
+        // VR Raycast
         const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
         raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
         raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
@@ -116,39 +140,33 @@ renderer.setAnimationLoop(() => {
             marker.visible = false;
         }
     } else {
-        // --- DESKTOP WASD MOVEMENT ---
-        const speed = 0.08;
+        // --- DESKTOP/MOBILE MOVEMENT ---
+        const speed = 0.05;
         let moveF = 0, moveS = 0;
-        
-        if (keyStates['KeyW']) moveF += 1;
+        if (keyStates['KeyW'] || touchMode === 'WALK') moveF += 1;
         if (keyStates['KeyS']) moveF -= 1;
         if (keyStates['KeyA']) moveS -= 1;
         if (keyStates['KeyD']) moveS += 1;
 
         if (moveF !== 0 || moveS !== 0) {
-            // Forward/Back math
-            const dirX = Math.sin(yaw);
-            const dirZ = Math.cos(yaw);
-            
-            // Side/Side math (90 degrees offset)
-            const sideX = Math.sin(yaw - Math.PI / 2);
-            const sideZ = Math.cos(yaw - Math.PI / 2);
+            // We use the Rig's rotation for move direction
+            const dirX = Math.sin(cameraRig.rotation.y);
+            const dirZ = Math.cos(cameraRig.rotation.y);
+            const sideX = Math.sin(cameraRig.rotation.y - Math.PI/2);
+            const sideZ = Math.cos(cameraRig.rotation.y - Math.PI/2);
 
             const nextX = cameraRig.position.x + (dirX * moveF + sideX * moveS) * speed;
             const nextZ = cameraRig.position.z + (dirZ * moveF + sideZ * moveS) * speed;
 
-            // SAFETY CHECK: If you are inside the box, move. 
-            // If you don't have a box, move.
             const testPoint = new THREE.Vector3(nextX, 0, nextZ);
             if (!hasClipping || clippingBox.containsPoint(testPoint)) {
                 cameraRig.position.x = nextX;
                 cameraRig.position.z = nextZ;
             }
         }
-        
-        // Update Rotation
-        camera.rotation.set(pitch, 0, 0);
-        cameraRig.rotation.set(0, yaw, 0);
+        // Sync visual rotations
+        cameraRig.rotation.y = yaw;
+        camera.rotation.x = pitch;
     }
     renderer.render(scene, camera);
 });
@@ -171,7 +189,36 @@ document.addEventListener('mousemove', (e) => {
 });
 
 document.addEventListener('click', () => { 
-    if (!renderer.xr.isPresenting) document.body.requestPointerLock();
+    if (!renderer.xr.isPresenting && !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        document.body.requestPointerLock();
+    }
+});
+
+// Mobile Touch
+renderer.domElement.addEventListener('touchstart', (e) => {
+    if (renderer.xr.isPresenting) return;
+    const t = e.touches[0];
+    lastTouchX = t.pageX; lastTouchY = t.pageY;
+    touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
+}, { passive: false });
+
+renderer.domElement.addEventListener('touchmove', (e) => {
+    if (renderer.xr.isPresenting) return;
+    const t = e.touches[0];
+    if (touchMode === 'LOOK') {
+        yaw -= (t.pageX - lastTouchX) * 0.005;
+        pitch -= (t.pageY - lastTouchY) * 0.005;
+        pitch = Math.max(-1.5, Math.min(1.5, pitch));
+    }
+    lastTouchX = t.pageX; lastTouchY = t.pageY;
+}, { passive: false });
+
+renderer.domElement.addEventListener('touchend', () => { touchMode = null; });
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
 renderer.xr.addEventListener('sessionend', () => { goHome(); });
