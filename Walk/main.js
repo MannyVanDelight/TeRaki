@@ -7,7 +7,7 @@ import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerM
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
 
-// Gradient Background
+// High-end Gradient Background
 const canvas = document.createElement('canvas');
 canvas.width = 2; canvas.height = 512;
 const context = canvas.getContext('2d');
@@ -18,12 +18,12 @@ context.fillStyle = gradient;
 context.fillRect(0, 0, 2, 512);
 scene.background = new THREE.CanvasTexture(canvas);
 
-// CAMERA RIG SYSTEM (Crucial for switching modes)
+// VR RIG SYSTEM (Hierarchy: Scene -> Rig -> Camera)
 const cameraRig = new THREE.Group();
 scene.add(cameraRig);
 
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
-cameraRig.add(camera); // Camera must be a child of the rig
+cameraRig.add(camera);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -34,24 +34,21 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// --- 2. VARIABLES & STATE ---
-let yaw = Math.PI, pitch = 0; // Start facing backward (towards room) if needed
+// --- 2. STATE & GLOBALS ---
+let yaw = Math.PI, pitch = 0;
 const homeData = { pos: new THREE.Vector3(0, 0, 0), yaw: Math.PI };
 let clippingBox = new THREE.Box3();
 let hasClipping = false;
 let intersectPoint = null;
-
-// Desktop/Mobile Input State
 const keyStates = {};
-let touchMode = null, lastTouchX = 0, lastTouchY = 0;
 
-// --- 3. LOADER SETUP ---
+// --- 3. LOADERS SETUP ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 
-// --- 4. VR CONTROLLERS ---
+// --- 4. VR CONTROLLERS & TELEPORT ---
 const raycaster = new THREE.Raycaster();
 const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
@@ -63,8 +60,7 @@ scene.add(marker);
 const controller1 = renderer.xr.getController(0);
 controller1.addEventListener('selectstart', () => {
     if (intersectPoint && marker.visible) {
-        // Teleport the RIG, not the camera
-        cameraRig.position.set(intersectPoint.x, intersectPoint.y, intersectPoint.z);
+        cameraRig.position.copy(intersectPoint);
     }
 });
 cameraRig.add(controller1);
@@ -74,46 +70,32 @@ const grip1 = renderer.xr.getControllerGrip(0);
 grip1.add(controllerModelFactory.createControllerModel(grip1));
 cameraRig.add(grip1);
 
-// --- 5. CRITICAL FIX: SESSION MANAGER ---
-// This resets the camera when you TAKE OFF the headset
-renderer.xr.addEventListener('sessionend', () => {
-    // 1. Reset Camera Local Position (Eyes at 1.6m height)
-    camera.position.set(0, 1.6, 0);
-    // 2. Reset Camera Rotation (Look straight ahead)
-    camera.rotation.set(0, 0, 0);
-    // 3. Sync rotation variables so mouse doesn't "snap"
-    pitch = 0;
-    // We keep 'yaw' as is, so you face the same direction you were looking
-});
+// --- 5. CORE FUNCTIONS ---
 
-renderer.xr.addEventListener('sessionstart', () => {
-    // In VR, the camera local position is managed by the headset
-    camera.position.set(0, 0, 0);
-});
-
-// --- 6. FUNCTIONS ---
 function goHome() {
+    // Reset the Rig (Feet)
     cameraRig.position.copy(homeData.pos);
     yaw = homeData.yaw; 
     pitch = 0;
     
-    // Ensure height is correct based on mode
+    // Desktop: Eye level height. VR: 0 height (headset provides height).
     if (!renderer.xr.isPresenting) {
         camera.position.set(0, 1.6, 0);
     } else {
         camera.position.set(0, 0, 0);
     }
+    camera.rotation.set(0,0,0);
 }
 
 function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
-
         if (isMain) {
-            // A. START POSITION - Look for exact match or specific prefix
-            if (name === "start" || name.startsWith("start_")) {
+            // A. START POSITION (Strict check)
+            if (name === "start") {
+                child.updateMatrixWorld();
                 child.getWorldPosition(homeData.pos);
-                homeData.pos.y = 0; 
+                homeData.pos.y = 0; // Ensure feet are on ground
                 const worldQuat = new THREE.Quaternion();
                 child.getWorldQuaternion(worldQuat);
                 const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
@@ -121,30 +103,23 @@ function processModel(gltf, isMain) {
                 child.visible = false;
                 return;
             }
-
-            // B. CLIPPING - Only hide if the name is EXACTLY "clip" or "collision_clip"
-            // This prevents "Partition" walls from being hidden
-            if (name === "clip" || name === "collision_clip") {
+            // B. CLIPPING BOUNDARY (Strict check)
+            if (name === "clip") {
                 child.geometry.computeBoundingBox();
                 child.updateMatrixWorld();
                 clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
                 if(child.material) child.material.visible = false; 
-                child.userData.isClip = true; 
                 hasClipping = true;
                 return;
             }
-
-            // C. FLOOR - Only hide the main navigation floor
-            // Change this to match the EXACT name of your invisible nav floor in Blender
-            if (name === "floor" || name === "teleport_floor") {
+            // C. TELEPORT FLOOR (Strict check)
+            if (name === "floor") {
                 child.userData.isFloor = true; 
-                if(child.material) child.material.visible = false; 
-                return; // Exit early so it doesn't get baked textures
+                if(child.material) child.material.visible = false;
+                return;
             }
         }
-
-        // Apply Baked Textures to everything else
-        // (This will now include your Partition Wall because it's no longer caught above)
+        // Apply Baked Textures to visible architectural meshes
         if (child.isMesh && child.material && child.material.map) {
             child.material.emissive = new THREE.Color(0xffffff);
             child.material.emissiveMap = child.material.map;
@@ -183,55 +158,42 @@ function handleVRRaycast() {
     }
 }
 
-// --- 7. ANIMATION LOOP ---
+// --- 6. ANIMATION LOOP ---
 renderer.setAnimationLoop(() => {
-    // A. VR MODE
     if (renderer.xr.isPresenting) {
         handleVRRaycast();
-    } 
-    // B. DESKTOP / MOBILE MODE
-    else {
-        // 1. Calculate Movement (WASD)
+    } else {
+        // Desktop Movement (WASD)
         const speed = 0.05;
         let moveF = 0, moveS = 0;
-        if (keyStates['KeyW'] || touchMode === 'WALK') moveF += 1;
+        if (keyStates['KeyW']) moveF += 1;
         if (keyStates['KeyS']) moveF -= 1;
         if (keyStates['KeyA']) moveS -= 1;
         if (keyStates['KeyD']) moveS += 1;
 
         if (moveF !== 0 || moveS !== 0) {
-            // Move relative to where the CAMERA is looking
-            const fX = Math.sin(yaw);
-            const fZ = Math.cos(yaw);
-            const rX = Math.sin(yaw - Math.PI / 2);
-            const rZ = Math.cos(yaw - Math.PI / 2);
-            
-            const nX = cameraRig.position.x + (fX * moveF + rX * moveS) * speed;
-            const nZ = cameraRig.position.z + (fZ * moveF + rZ * moveS) * speed;
+            const nX = cameraRig.position.x + (Math.sin(yaw) * moveF + Math.sin(yaw - Math.PI / 2) * moveS) * speed;
+            const nZ = cameraRig.position.z + (Math.cos(yaw) * moveF + Math.cos(yaw - Math.PI / 2) * moveS) * speed;
 
-            // Collision Check
-            const testPoint = new THREE.Vector3(nX, 0, nZ); // Force Y=0 for floor check
+            const testPoint = new THREE.Vector3(nX, 0, nZ);
             if (!hasClipping || clippingBox.containsPoint(testPoint)) {
                 cameraRig.position.x = nX;
                 cameraRig.position.z = nZ;
             }
         }
-
-        // 2. Update Camera Rotation (Look)
-        // We use a "LookAt" target to prevent gimbal lock issues
-        const target = new THREE.Vector3();
-        target.set(
+        
+        // Desktop Rotation (Look)
+        const target = new THREE.Vector3(
             cameraRig.position.x + Math.sin(yaw) * Math.cos(pitch),
-            cameraRig.position.y + 1.6 + Math.sin(pitch), // +1.6 matches eye height
+            cameraRig.position.y + 1.6 + Math.sin(pitch),
             cameraRig.position.z + Math.cos(yaw) * Math.cos(pitch)
         );
         camera.lookAt(target);
     }
-    
     renderer.render(scene, camera);
 });
 
-// --- 8. LOADING ---
+// --- 7. LOADING MODELS ---
 loader.load('./models/TeRaki-05.glb', (gltf) => {
     processModel(gltf, true);
     const loaderDiv = document.getElementById('loader');
@@ -243,49 +205,29 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
 loader.load('./models/furniture01.glb', (gltf) => processModel(gltf, false));
 loader.load('./models/bg01.glb', (gltf) => processModel(gltf, false));
 
-// --- 9. EVENTS (Mouse & Touch) ---
+// --- 8. GLOBAL EVENTS ---
 document.addEventListener('keydown', (e) => keyStates[e.code] = true);
 document.addEventListener('keyup', (e) => keyStates[e.code] = false);
-
-document.addEventListener('click', () => { 
-    if (!renderer.xr.isPresenting && !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        document.body.requestPointerLock();
-    }
-});
 
 document.addEventListener('mousemove', (e) => {
     if (document.pointerLockElement === document.body) {
         yaw -= e.movementX * 0.002;
         pitch -= e.movementY * 0.002;
-        // Limit looking up/down
         pitch = Math.max(-1.5, Math.min(1.5, pitch));
     }
 });
 
-// Mobile Touch Logic
-renderer.domElement.addEventListener('touchstart', (e) => {
-    if (renderer.xr.isPresenting) return;
-    e.preventDefault();
-    const t = e.touches[0];
-    lastTouchX = t.pageX; lastTouchY = t.pageY;
-    touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
-}, { passive: false });
+document.addEventListener('click', () => { 
+    if (!renderer.xr.isPresenting) document.body.requestPointerLock();
+});
 
-renderer.domElement.addEventListener('touchmove', (e) => {
-    if (renderer.xr.isPresenting) return;
-    e.preventDefault();
-    const t = e.touches[0];
-    if (touchMode === 'LOOK') {
-        yaw -= (t.pageX - lastTouchX) * 0.005;
-        pitch -= (t.pageY - lastTouchY) * 0.005;
-        pitch = Math.max(-1.5, Math.min(1.5, pitch));
-    }
-    lastTouchX = t.pageX; lastTouchY = t.pageY;
-}, { passive: false });
-
-renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Clean Exit VR: Hard reset to start position
+renderer.xr.addEventListener('sessionend', () => {
+    goHome();
 });
