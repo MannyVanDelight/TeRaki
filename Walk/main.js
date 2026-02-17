@@ -90,11 +90,6 @@ const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xffff
 controller1.add(line);
 
 // --- 5. MODEL LOADING ---
-const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-const loader = new GLTFLoader();
-loader.setDRACOLoader(dracoLoader);
-
 function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
@@ -115,19 +110,25 @@ function processModel(gltf, isMain) {
                 child.geometry.computeBoundingBox();
                 child.updateMatrixWorld();
                 clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+                
+                // Invisible but raycastable
                 if(child.material) child.material.visible = false; 
                 child.userData.isClip = true; 
                 hasClipping = true;
                 return;
             }
 
-            // C. FLOOR (Navigation Surface)
+            // C. FLOOR (Invisible Navigation Surface)
             if (name.includes("floor")) {
                 child.userData.isFloor = true; 
+                
+                // NEW: Make the floor invisible to the eye but detectable by the laser
+                if(child.material) child.material.visible = false;
             }
         }
 
-        if (child.isMesh) {
+        // Apply Baked Textures to everything else (furniture, walls, etc.)
+        if (child.isMesh && !name.includes("floor") && !name.includes("clip")) {
             if (child.material.map) {
                 child.material.emissive = new THREE.Color(0xffffff);
                 child.material.emissiveMap = child.material.map;
