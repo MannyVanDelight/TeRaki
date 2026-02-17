@@ -7,7 +7,7 @@ import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerM
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
 
-// Gradient Background
+// High-end Gradient Background
 const canvas = document.createElement('canvas');
 canvas.width = 2; canvas.height = 512;
 const context = canvas.getContext('2d');
@@ -20,54 +20,42 @@ scene.background = new THREE.CanvasTexture(canvas);
 
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-// VR RIG: Holds the camera and controllers
+// VR RIG (The "Feet" of the user)
 const cameraRig = new THREE.Group();
 cameraRig.add(camera);
 scene.add(cameraRig);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
-renderer.outputColorSpace = THREE.SRGBColorSpace; 
-
-// --- 2. VR ACTIVATION ---
+renderer.setPixelRatio(window.devicePixelRatio);
 renderer.xr.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace; 
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
-renderer.domElement.style.touchAction = 'none';
 
-// --- 3. STATE & HOME LOGIC ---
-let yaw = Math.PI, pitch = 0;
-const homeData = { pos: new THREE.Vector3(0, 1.4, 8), yaw: Math.PI };
+// --- 2. STATE & BOUNDARIES ---
+let yaw = 0, pitch = 0;
+const homeData = { pos: new THREE.Vector3(0, 0, 0), yaw: 0 };
 let clippingBox = new THREE.Box3();
 let hasClipping = false;
 
 function goHome() {
-    if (renderer.xr.isPresenting) {
-        // In VR, we move the Rig
-        cameraRig.position.copy(homeData.pos);
-        // Reset Rig rotation if needed (optional)
-        cameraRig.rotation.set(0, 0, 0);
+    // In VR, the rig is the floor. In Desktop, we set camera height to 1.6m (eye level)
+    cameraRig.position.copy(homeData.pos);
+    if (!renderer.xr.isPresenting) {
+        camera.position.set(0, 1.6, 0); 
     } else {
-        // In Desktop, we move the Camera
-        camera.position.copy(homeData.pos);
+        camera.position.set(0, 0, 0);
     }
-    yaw = homeData.yaw; 
+    yaw = homeData.yaw;
     pitch = 0;
 }
 
-document.getElementById('home-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    goHome();
-});
-
-// --- 4. VR CONTROLLERS & TELEPORT SETUP ---
-const controllerModelFactory = new XRControllerModelFactory();
+// --- 3. VR CONTROLLERS & TELEPORT ---
 const raycaster = new THREE.Raycaster();
 let intersectPoint = null;
 
-// Teleport Marker (The Ring)
 const marker = new THREE.Mesh(
     new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 })
@@ -75,31 +63,21 @@ const marker = new THREE.Mesh(
 marker.visible = false;
 scene.add(marker);
 
-// Controller 1 (Right Hand usually)
 const controller1 = renderer.xr.getController(0);
 controller1.addEventListener('selectstart', () => {
-    // Teleport on Trigger Pull
-    if (intersectPoint && marker.visible) {
-        // Move the rig to the teleport target
-        cameraRig.position.set(intersectPoint.x, intersectPoint.y, intersectPoint.z);
-    }
+    if (intersectPoint) cameraRig.position.copy(intersectPoint);
 });
 cameraRig.add(controller1);
 
-// Add visual model to controller
+const controllerModelFactory = new XRControllerModelFactory();
 const grip1 = renderer.xr.getControllerGrip(0);
 grip1.add(controllerModelFactory.createControllerModel(grip1));
 cameraRig.add(grip1);
 
-// Add a simple guidance line to the controller
-const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-5)]);
-const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 }));
-controller1.add(line);
-
-// --- 5. MODEL LOADING ---
+// --- 4. MODEL LOADING ---
+const loader = new GLTFLoader();
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-const loader = new GLTFLoader();
 loader.setDRACOLoader(dracoLoader);
 
 function processModel(gltf, isMain) {
@@ -107,154 +85,115 @@ function processModel(gltf, isMain) {
         const name = child.name.toLowerCase();
 
         if (isMain) {
-            // 1. Handle Start Position
+            // A. START POSITION
             if (name.includes("start")) {
-                homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
-                const worldQuat = child.getWorldQuaternion(new THREE.Quaternion());
+                child.updateMatrixWorld();
+                child.getWorldPosition(homeData.pos);
+                const worldQuat = new THREE.Quaternion();
+                child.getWorldQuaternion(worldQuat);
                 const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
-                homeData.yaw = euler.y + Math.PI;
+                homeData.yaw = euler.y;
                 child.visible = false;
                 return;
             }
             
-            // 2. Handle Clipping / Teleport Floor
+            // B. CLIPPING BOUNDARY
             if (name.includes("clip")) {
-                // Determine bounding box for Desktop WASD
                 child.geometry.computeBoundingBox();
                 child.updateMatrixWorld();
                 clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
-                
-                // IMPORTANT: 
-                // We set 'material.visible' to false so it is invisible to the eye.
-                // We keep 'child.visible' true so the Raycaster can still hit it.
-                if(child.material) child.material.visible = false; 
-                child.userData.isClip = true; // Tag for VR Raycaster
-                
+                child.visible = false;
                 hasClipping = true;
                 return;
             }
+
+            // C. TELEPORT FLOOR
+            if (name.includes("floor")) {
+                child.userData.isFloor = true;
+            }
         }
 
-        if (child.isMesh) {
-            // Apply baked texture settings
-            if (child.material.map) {
-                child.material.emissive = new THREE.Color(0xffffff);
-                child.material.emissiveMap = child.material.map;
-                child.material.emissiveIntensity = 1.0; 
-                child.material.color = new THREE.Color(0x000000);
-            }
+        // Apply Baked Textures
+        if (child.isMesh && child.material.map) {
+            child.material.emissive = new THREE.Color(0xffffff);
+            child.material.emissiveMap = child.material.map;
+            child.material.emissiveIntensity = 1.0;
+            child.material.color = new THREE.Color(0x000000);
         }
     });
     scene.add(gltf.scene);
     if (isMain) goHome();
 }
 
-loader.load('./models/TeRaki-05.glb', (gltf) => {
-    processModel(gltf, true);
-    // Hide loader
-    const loaderDiv = document.getElementById('loader');
-    if(loaderDiv) {
-        loaderDiv.style.opacity = '0';
-        setTimeout(() => loaderDiv.style.display = 'none', 500);
-    }
-});
-loader.load('./models/furniture01.glb', (gltf) => processModel(gltf, false));
-loader.load('./models/bg01.glb', (gltf) => processModel(gltf, false));
+loader.load('./models/TeRaki-05.glb', (gltf) => processModel(gltf, true));
 
-
-// --- 6. ANIMATION & MOVEMENT LOOPS ---
-
-// Desktop/Mobile Input State
+// --- 5. ANIMATION & INPUT ---
 const keyStates = {};
 let touchMode = null, lastTouchX = 0, lastTouchY = 0;
 
-function updateDesktopCamera() {
-    const target = new THREE.Vector3();
-    const fX = Math.sin(yaw) * Math.cos(pitch);
-    const fY = Math.sin(pitch);
-    const fZ = Math.cos(yaw) * Math.cos(pitch);
-    target.set(camera.position.x + fX, camera.position.y + fY, camera.position.z + fZ);
-    camera.lookAt(target);
-}
+function handleVRTeleport() {
+    if (renderer.xr.isPresenting && controller1) {
+        const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
+        raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
+        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
 
-function handleVRRaycast() {
-    if (!controller1) return;
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        const floorHit = intersects.find(i => i.object.userData.isFloor);
 
-    // Set raycaster from controller position
-    const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
-    raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
-    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-
-    // Intersect against scene children
-    const intersects = raycaster.intersectObjects(scene.children, true);
-
-    // Find the first hit that is our "clip" object
-    // We check userData.isClip OR name includes 'clip' to be safe
-    const validHit = intersects.find(hit => 
-        hit.object.userData.isClip || hit.object.name.toLowerCase().includes("clip")
-    );
-
-    if (validHit) {
-        // Ensure we are hitting the top surface (normal pointing up)
-        // This prevents teleporting to the underside or vertical walls of the clip box
-        if (validHit.face.normal.y > 0.5) {
-            intersectPoint = validHit.point;
-            marker.position.copy(intersectPoint);
+        if (floorHit) {
+            marker.position.copy(floorHit.point);
             marker.visible = true;
-            marker.material.color.set(0x00ff00); // Green = Good to go
-            return;
+            if (hasClipping && clippingBox.containsPoint(floorHit.point)) {
+                intersectPoint = floorHit.point;
+                marker.material.color.set(0x00ff00);
+            } else {
+                intersectPoint = null;
+                marker.material.color.set(0xff0000);
+            }
+        } else {
+            marker.visible = false;
+            intersectPoint = null;
         }
     }
+}
 
-    // If no valid hit found
-    marker.visible = false;
-    intersectPoint = null;
+function updateDesktopCamera() {
+    const target = new THREE.Vector3();
+    const lookAtPos = new THREE.Vector3(
+        cameraRig.position.x + Math.sin(yaw) * Math.cos(pitch),
+        cameraRig.position.y + camera.position.y + Math.sin(pitch),
+        cameraRig.position.z + Math.cos(yaw) * Math.cos(pitch)
+    );
+    camera.lookAt(lookAtPos);
 }
 
 function animate() {
-    // 1. VR MODE
     if (renderer.xr.isPresenting) {
-        handleVRRaycast();
-    } 
-    // 2. DESKTOP / MOBILE MODE
-    else {
+        handleVRTeleport();
+    } else {
         const speed = 0.05;
         let moveF = 0, moveS = 0;
-
         if (keyStates['KeyW'] || touchMode === 'WALK') moveF += 1;
         if (keyStates['KeyS']) moveF -= 1;
         if (keyStates['KeyA']) moveS -= 1;
         if (keyStates['KeyD']) moveS += 1;
 
         if (moveF !== 0 || moveS !== 0) {
-            const fX = Math.sin(yaw), fZ = Math.cos(yaw);
-            const rX = Math.sin(yaw - Math.PI / 2), rZ = Math.cos(yaw - Math.PI / 2);
-            
-            const nX = camera.position.x + (fX * moveF + rX * moveS) * speed;
-            const nZ = camera.position.z + (fZ * moveF + rZ * moveS) * speed;
-
-            // Check if new position is inside the clipping box
-            const testPoint = new THREE.Vector3(nX, camera.position.y, nZ);
-            if (!hasClipping || clippingBox.containsPoint(testPoint)) {
-                camera.position.x = nX;
-                camera.position.z = nZ;
+            const nX = cameraRig.position.x + (Math.sin(yaw) * moveF + Math.sin(yaw - Math.PI/2) * moveS) * speed;
+            const nZ = cameraRig.position.z + (Math.cos(yaw) * moveF + Math.cos(yaw - Math.PI/2) * moveS) * speed;
+            if (!hasClipping || clippingBox.containsPoint(new THREE.Vector3(nX, cameraRig.position.y, nZ))) {
+                cameraRig.position.x = nX; cameraRig.position.z = nZ;
             }
         }
         updateDesktopCamera();
     }
-
     renderer.render(scene, camera);
 }
-
-// Start Loop
 renderer.setAnimationLoop(animate);
 
-// --- 7. DESKTOP EVENTS ---
-document.addEventListener('click', () => { 
-    if (!renderer.xr.isPresenting && !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        document.body.requestPointerLock();
-    }
-});
+// --- 6. EVENTS ---
+document.addEventListener('keydown', (e) => keyStates[e.code] = true);
+document.addEventListener('keyup', (e) => keyStates[e.code] = false);
 document.addEventListener('mousemove', (e) => {
     if (document.pointerLockElement === document.body) {
         yaw -= e.movementX * 0.002;
@@ -262,13 +201,18 @@ document.addEventListener('mousemove', (e) => {
         pitch = Math.max(-1.5, Math.min(1.5, pitch));
     }
 });
-document.addEventListener('keydown', (e) => { keyStates[e.code] = true; });
-document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
+document.addEventListener('click', () => {
+    if (!renderer.xr.isPresenting) document.body.requestPointerLock();
+});
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
-// Touch Events
+// Mobile Touch Controls
 renderer.domElement.addEventListener('touchstart', (e) => {
-    if (renderer.xr.isPresenting) return; // Ignore touch in VR
-    e.preventDefault();
+    if (renderer.xr.isPresenting) return;
     const t = e.touches[0];
     lastTouchX = t.pageX; lastTouchY = t.pageY;
     touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
@@ -276,19 +220,13 @@ renderer.domElement.addEventListener('touchstart', (e) => {
 
 renderer.domElement.addEventListener('touchmove', (e) => {
     if (renderer.xr.isPresenting) return;
-    e.preventDefault();
+    const t = e.touches[0];
     if (touchMode === 'LOOK') {
-        const t = e.touches[0];
         yaw -= (t.pageX - lastTouchX) * 0.005;
         pitch -= (t.pageY - lastTouchY) * 0.005;
         pitch = Math.max(-1.5, Math.min(1.5, pitch));
-        lastTouchX = t.pageX; lastTouchY = t.pageY;
     }
+    lastTouchX = t.pageX; lastTouchY = t.pageY;
 }, { passive: false });
 
-renderer.domElement.addEventListener('touchend', () => { touchMode = null; }, { passive: false });
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
+renderer.domElement.addEventListener('touchend', () => touchMode = null);
