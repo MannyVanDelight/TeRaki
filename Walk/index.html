@@ -4,9 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>3D Apartment Tour</title>
-    <style>
+ <style>
         body { margin: 0; overflow: hidden; background-color: #e0e0e0; font-family: sans-serif; }
-        canvas { display: block; touch-action: none; }
+        
+        /* UPDATED: Added user-select to stop mobile text-selection highlights */
+        canvas { 
+            display: block; 
+            touch-action: none; 
+            user-select: none; 
+            -webkit-user-select: none; 
+            -webkit-touch-callout: none; 
+        }
 
         /* Loading Screen */
         #loader {
@@ -40,6 +48,13 @@
             border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 20px;
             color: #444; font-size: 11px; cursor: pointer; z-index: 20;
             text-transform: uppercase; letter-spacing: 1px; outline: none;
+        }
+
+        /* NEW: This ensures the VR button is clickable and positioned correctly */
+        #XRButton {
+            right: 20px !important;
+            left: auto !important;
+            bottom: 20px !important;
         }
     </style>
 </head>

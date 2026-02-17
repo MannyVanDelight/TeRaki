@@ -1,8 +1,8 @@
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
-import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js';
+import * as THREE from 'https://cdn.skypack.dev/three@0.160.0';
+import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'https://cdn.skypack.dev/three@0.160.0/examples/jsm/loaders/DRACOLoader.js';
+import { VRButton } from 'https://cdn.skypack.dev/three@0.160.0/examples/jsm/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'https://cdn.skypack.dev/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js';
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
