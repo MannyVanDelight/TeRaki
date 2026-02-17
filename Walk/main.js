@@ -35,7 +35,7 @@ document.body.appendChild(VRButton.createButton(renderer));
 
 // --- 2. STATE ---
 let yaw = Math.PI, pitch = 0;
-const homeData = { pos: new THREE.Vector3(0, 0, 8), yaw: Math.PI }; // Y=0 for Rig
+const homeData = { pos: new THREE.Vector3(0, 0, 8), yaw: Math.PI }; 
 let clippingBox = new THREE.Box3(), hasClipping = false;
 let intersectPoint = null;
 const keyStates = {};
@@ -69,12 +69,9 @@ cameraRig.add(grip1);
 // --- 5. FUNCTIONS ---
 
 function goHome() {
-    // Reset Rig to floor (0)
     cameraRig.position.set(homeData.pos.x, 0, homeData.pos.z);
     yaw = homeData.yaw; 
     pitch = 0;
-
-    // If on Desktop, simulate eyes at 1.6m. If in VR, let headset decide.
     if (!renderer.xr.isPresenting) {
         camera.position.y = 1.6; 
     } else {
@@ -86,25 +83,34 @@ function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
         if (isMain) {
+            // FIX: Start position rotation logic
             if (name === "start") {
+                child.updateMatrixWorld();
                 child.getWorldPosition(homeData.pos);
-                homeData.pos.y = 0; // Force home floor level
-                const worldQuat = child.getWorldQuaternion(new THREE.Quaternion());
-                homeData.yaw = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ').y + Math.PI;
+                homeData.pos.y = 0; 
+                
+                // Fixed Rotation Logic: Use Quaternion instead of non-existent getWorldRotation
+                const worldQuat = new THREE.Quaternion();
+                child.getWorldQuaternion(worldQuat);
+                const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
+                homeData.yaw = euler.y + Math.PI;
+                
                 child.visible = false;
             }
-            if (name === "clip") {
+            // FIX: Geometry check for clip
+            if (name === "clip" && child.geometry) {
                 child.geometry.computeBoundingBox();
                 child.updateMatrixWorld();
                 clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
                 child.visible = false; hasClipping = true;
             }
+            // Floor check
             if (name === "floor") {
                 child.userData.isFloor = true;
                 child.visible = false; 
             }
         }
-        if (child.isMesh && child.material.map) {
+        if (child.isMesh && child.material && child.material.map) {
             child.material.emissive = new THREE.Color(0xffffff);
             child.material.emissiveMap = child.material.map;
             child.material.emissiveIntensity = 1.0; 
@@ -118,7 +124,6 @@ function processModel(gltf, isMain) {
 // --- 6. ANIMATION LOOP ---
 renderer.setAnimationLoop(() => {
     if (renderer.xr.isPresenting) {
-        // VR Logic
         const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
         raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
         raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
@@ -130,7 +135,6 @@ renderer.setAnimationLoop(() => {
             intersectPoint = floorHit.point;
         } else { marker.visible = false; }
     } else {
-        // Desktop WASD
         const speed = 0.05;
         let moveF = 0, moveS = 0;
         if (keyStates['KeyW']) moveF += 1;
@@ -173,17 +177,11 @@ document.addEventListener('mousedown', () => {
     if (!renderer.xr.isPresenting) document.body.requestPointerLock();
 });
 
-// --- CRITICAL VR HEIGHT FIX ---
 renderer.xr.addEventListener('sessionstart', () => {
-    // When entering VR, the Rig must be at 0 height.
-    // The headset height is then added on top of that.
     camera.position.set(0, 0, 0); 
     cameraRig.position.y = 0; 
 });
-
-renderer.xr.addEventListener('sessionend', () => { 
-    goHome(); 
-});
+renderer.xr.addEventListener('sessionend', () => { goHome(); });
 
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
