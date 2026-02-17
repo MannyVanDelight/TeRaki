@@ -7,7 +7,7 @@ import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerM
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
 
-// High-end Gradient Background
+// High-end Background Gradient
 const canvas = document.createElement('canvas');
 canvas.width = 2; canvas.height = 512;
 const context = canvas.getContext('2d');
@@ -20,7 +20,7 @@ scene.background = new THREE.CanvasTexture(canvas);
 
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-// VR RIG (The "Feet" of the user)
+// VR RIG (Moving this moves the user's feet)
 const cameraRig = new THREE.Group();
 cameraRig.add(camera);
 scene.add(cameraRig);
@@ -41,8 +41,10 @@ let clippingBox = new THREE.Box3();
 let hasClipping = false;
 
 function goHome() {
-    // In VR, the rig is the floor. In Desktop, we set camera height to 1.6m (eye level)
+    // Moves rig to 'start' position. 
     cameraRig.position.copy(homeData.pos);
+    
+    // Desktop: set eye level. VR: headset handles height.
     if (!renderer.xr.isPresenting) {
         camera.position.set(0, 1.6, 0); 
     } else {
@@ -125,11 +127,22 @@ function processModel(gltf, isMain) {
     if (isMain) goHome();
 }
 
-loader.load('./models/TeRaki-05.glb', (gltf) => processModel(gltf, true));
+loader.load('./models/TeRaki-05.glb', (gltf) => {
+    processModel(gltf, true);
+    
+    // --- REMOVE THE "ENTERING APARTMENT" OVERLAY ---
+    const overlay = document.getElementById('loader') || 
+                    document.getElementById('loading-screen') || 
+                    document.querySelector('.loader');
+    if (overlay) {
+        overlay.style.transition = 'opacity 0.8s ease';
+        overlay.style.opacity = '0';
+        setTimeout(() => overlay.style.display = 'none', 800);
+    }
+});
 
 // --- 5. ANIMATION & INPUT ---
 const keyStates = {};
-let touchMode = null, lastTouchX = 0, lastTouchY = 0;
 
 function handleVRTeleport() {
     if (renderer.xr.isPresenting && controller1) {
@@ -158,7 +171,6 @@ function handleVRTeleport() {
 }
 
 function updateDesktopCamera() {
-    const target = new THREE.Vector3();
     const lookAtPos = new THREE.Vector3(
         cameraRig.position.x + Math.sin(yaw) * Math.cos(pitch),
         cameraRig.position.y + camera.position.y + Math.sin(pitch),
@@ -173,7 +185,7 @@ function animate() {
     } else {
         const speed = 0.05;
         let moveF = 0, moveS = 0;
-        if (keyStates['KeyW'] || touchMode === 'WALK') moveF += 1;
+        if (keyStates['KeyW']) moveF += 1;
         if (keyStates['KeyS']) moveF -= 1;
         if (keyStates['KeyA']) moveS -= 1;
         if (keyStates['KeyD']) moveS += 1;
@@ -209,24 +221,3 @@ window.addEventListener('resize', () => {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
-
-// Mobile Touch Controls
-renderer.domElement.addEventListener('touchstart', (e) => {
-    if (renderer.xr.isPresenting) return;
-    const t = e.touches[0];
-    lastTouchX = t.pageX; lastTouchY = t.pageY;
-    touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
-}, { passive: false });
-
-renderer.domElement.addEventListener('touchmove', (e) => {
-    if (renderer.xr.isPresenting) return;
-    const t = e.touches[0];
-    if (touchMode === 'LOOK') {
-        yaw -= (t.pageX - lastTouchX) * 0.005;
-        pitch -= (t.pageY - lastTouchY) * 0.005;
-        pitch = Math.max(-1.5, Math.min(1.5, pitch));
-    }
-    lastTouchX = t.pageX; lastTouchY = t.pageY;
-}, { passive: false });
-
-renderer.domElement.addEventListener('touchend', () => touchMode = null);
