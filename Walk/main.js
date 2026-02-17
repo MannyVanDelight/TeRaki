@@ -7,6 +7,7 @@ import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerM
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
 
+// Gradient Background
 const canvas = document.createElement('canvas');
 canvas.width = 2; canvas.height = 512;
 const context = canvas.getContext('2d');
@@ -17,12 +18,12 @@ context.fillStyle = gradient;
 context.fillRect(0, 0, 2, 512);
 scene.background = new THREE.CanvasTexture(canvas);
 
-// THE RIG
+// THE RIG (This is what WASD moves)
 const cameraRig = new THREE.Group();
 scene.add(cameraRig);
 
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
-cameraRig.add(camera);
+cameraRig.add(camera); // Camera inside Rig
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -35,7 +36,7 @@ document.body.appendChild(VRButton.createButton(renderer));
 
 // --- 2. STATE ---
 let yaw = Math.PI, pitch = 0;
-const homeData = { pos: new THREE.Vector3(0, 0, 8), yaw: Math.PI }; 
+const homeData = { pos: new THREE.Vector3(0, 1.4, 8), yaw: Math.PI };
 let clippingBox = new THREE.Box3(), hasClipping = false;
 let intersectPoint = null;
 const keyStates = {};
@@ -61,56 +62,35 @@ controller1.addEventListener('selectstart', () => {
 });
 cameraRig.add(controller1);
 
-const controllerModelFactory = new XRControllerModelFactory();
-const grip1 = renderer.xr.getControllerGrip(0);
-grip1.add(controllerModelFactory.createControllerModel(grip1));
-cameraRig.add(grip1);
-
 // --- 5. FUNCTIONS ---
-
 function goHome() {
-    cameraRig.position.set(homeData.pos.x, 0, homeData.pos.z);
+    cameraRig.position.copy(homeData.pos);
     yaw = homeData.yaw; 
     pitch = 0;
-    if (!renderer.xr.isPresenting) {
-        camera.position.y = 1.6; 
-    } else {
-        camera.position.y = 0; 
-    }
+    camera.position.set(0, 0, 0); // Reset local camera offset
 }
 
 function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
         const name = child.name.toLowerCase();
         if (isMain) {
-            // FIX: Start position rotation logic
             if (name === "start") {
-                child.updateMatrixWorld();
                 child.getWorldPosition(homeData.pos);
-                homeData.pos.y = 0; 
-                
-                // Fixed Rotation Logic: Use Quaternion instead of non-existent getWorldRotation
-                const worldQuat = new THREE.Quaternion();
-                child.getWorldQuaternion(worldQuat);
-                const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
-                homeData.yaw = euler.y + Math.PI;
-                
+                homeData.yaw = child.getWorldRotation(new THREE.Euler()).y + Math.PI;
                 child.visible = false;
             }
-            // FIX: Geometry check for clip
-            if (name === "clip" && child.geometry) {
+            if (name === "clip") {
                 child.geometry.computeBoundingBox();
                 child.updateMatrixWorld();
                 clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
                 child.visible = false; hasClipping = true;
             }
-            // Floor check
             if (name === "floor") {
                 child.userData.isFloor = true;
                 child.visible = false; 
             }
         }
-        if (child.isMesh && child.material && child.material.map) {
+        if (child.isMesh && child.material.map) {
             child.material.emissive = new THREE.Color(0xffffff);
             child.material.emissiveMap = child.material.map;
             child.material.emissiveIntensity = 1.0; 
@@ -124,6 +104,7 @@ function processModel(gltf, isMain) {
 // --- 6. ANIMATION LOOP ---
 renderer.setAnimationLoop(() => {
     if (renderer.xr.isPresenting) {
+        // VR Raycast Teleport
         const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
         raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
         raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
@@ -135,6 +116,7 @@ renderer.setAnimationLoop(() => {
             intersectPoint = floorHit.point;
         } else { marker.visible = false; }
     } else {
+        // Desktop Movement
         const speed = 0.05;
         let moveF = 0, moveS = 0;
         if (keyStates['KeyW']) moveF += 1;
@@ -148,10 +130,11 @@ renderer.setAnimationLoop(() => {
             const nX = cameraRig.position.x + (fX * moveF + rX * moveS) * speed;
             const nZ = cameraRig.position.z + (fZ * moveF + rZ * moveS) * speed;
             
-            if (!hasClipping || clippingBox.containsPoint(new THREE.Vector3(nX, 0.5, nZ))) {
+            if (!hasClipping || clippingBox.containsPoint(new THREE.Vector3(nX, cameraRig.position.y, nZ))) {
                 cameraRig.position.x = nX; cameraRig.position.z = nZ;
             }
         }
+        // Rotate the Head (Camera) and Body (Rig)
         camera.rotation.set(pitch, 0, 0);
         cameraRig.rotation.set(0, yaw, 0);
     }
@@ -176,13 +159,7 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('mousedown', () => { 
     if (!renderer.xr.isPresenting) document.body.requestPointerLock();
 });
-
-renderer.xr.addEventListener('sessionstart', () => {
-    camera.position.set(0, 0, 0); 
-    cameraRig.position.y = 0; 
-});
 renderer.xr.addEventListener('sessionend', () => { goHome(); });
-
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
