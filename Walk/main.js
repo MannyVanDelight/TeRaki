@@ -110,12 +110,10 @@ function processModel(gltf, isMain) {
         const name = child.name.toLowerCase();
 
         if (isMain) {
-            if (name.includes("start")) {
+            // A. START POSITION - Look for exact match or specific prefix
+            if (name === "start" || name.startsWith("start_")) {
                 child.getWorldPosition(homeData.pos);
-                // We assume start point is on floor (y=0). 
-                // If your start object is floating, force Y to 0:
                 homeData.pos.y = 0; 
-                
                 const worldQuat = new THREE.Quaternion();
                 child.getWorldQuaternion(worldQuat);
                 const euler = new THREE.Euler().setFromQuaternion(worldQuat, 'YXZ');
@@ -123,7 +121,10 @@ function processModel(gltf, isMain) {
                 child.visible = false;
                 return;
             }
-            if (name.includes("clip")) {
+
+            // B. CLIPPING - Only hide if the name is EXACTLY "clip" or "collision_clip"
+            // This prevents "Partition" walls from being hidden
+            if (name === "clip" || name === "collision_clip") {
                 child.geometry.computeBoundingBox();
                 child.updateMatrixWorld();
                 clippingBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
@@ -132,12 +133,19 @@ function processModel(gltf, isMain) {
                 hasClipping = true;
                 return;
             }
-            if (name.includes("floor")) {
+
+            // C. FLOOR - Only hide the main navigation floor
+            // Change this to match the EXACT name of your invisible nav floor in Blender
+            if (name === "floor" || name === "teleport_floor") {
                 child.userData.isFloor = true; 
                 if(child.material) child.material.visible = false; 
+                return; // Exit early so it doesn't get baked textures
             }
         }
-        if (child.isMesh && child.material.map) {
+
+        // Apply Baked Textures to everything else
+        // (This will now include your Partition Wall because it's no longer caught above)
+        if (child.isMesh && child.material && child.material.map) {
             child.material.emissive = new THREE.Color(0xffffff);
             child.material.emissiveMap = child.material.map;
             child.material.emissiveIntensity = 1.0; 
