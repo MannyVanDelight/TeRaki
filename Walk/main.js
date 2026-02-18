@@ -2,7 +2,6 @@ import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/DRACOLoader.js';
 import { VRButton } from 'https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js';
-import { XRControllerModelFactory } from 'https://unpkg.com/three@0.160.0/examples/jsm/webxr/XRControllerModelFactory.js';
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
@@ -26,6 +25,11 @@ let vrFloorY = 0;
 let clippingBox = new THREE.Box3();
 let hasClipping = false;
 
+// Touch State
+let touchMode = null;
+let lastTouchX = 0, lastTouchY = 0;
+let walkDirection = 0; // 1 for forward, -1 for backward, 0 for stop
+
 function goHome() {
     if (renderer.xr.isPresenting) {
         cameraRig.position.set(homeData.pos.x, vrFloorY, homeData.pos.z);
@@ -33,7 +37,6 @@ function goHome() {
     } else {
         camera.position.copy(homeData.pos);
         cameraRig.position.set(0, 0, 0); 
-        // Facing 180 degrees away from the wall
         yaw = homeData.yaw + Math.PI; 
         pitch = 0;
     }
@@ -44,7 +47,7 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
     goHome();
 });
 
-// --- 3. VR & RAYCASTING ---
+// --- 3. VR & ASSETS (Same as before) ---
 const controller1 = renderer.xr.getController(0);
 const raycaster = new THREE.Raycaster();
 let intersectPoint = null;
@@ -63,7 +66,6 @@ controller1.addEventListener('selectstart', () => {
 });
 cameraRig.add(controller1);
 
-// --- 4. LOADING ---
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 const loader = new GLTFLoader();
@@ -110,9 +112,8 @@ loader.load('./models/TeRaki-05.glb', (gltf) => {
 loader.load('./models/furniture01.glb', (gltf) => processModel(gltf, false));
 loader.load('./models/bg01.glb', (gltf) => processModel(gltf, false));
 
-// --- 5. MOVEMENT ---
+// --- 4. MOVEMENT ENGINE ---
 const keyStates = {};
-let touchMode = null, lastTouchX = 0, lastTouchY = 0, mobileMoveDelta = 0;
 
 function updateCameraRotation() {
     const fX = Math.sin(yaw) * Math.cos(pitch);
@@ -128,17 +129,22 @@ function animate() {
         raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
         const hit = raycaster.intersectObjects(scene.children, true).find(h => h.object.userData.isVRFloor);
         if (hit) {
-            intersectPoint = hit.point;
-            marker.position.copy(hit.point);
-            marker.visible = true;
+            intersectPoint = hit.point; marker.position.copy(hit.point); marker.visible = true;
         } else { marker.visible = false; }
     } else {
         const speed = 0.025;
         let moveF = 0, moveS = 0;
-        if (keyStates['KeyW'] || (touchMode === 'WALK' && mobileMoveDelta > 10)) moveF += 1;
-        if (keyStates['KeyS'] || (touchMode === 'WALK' && mobileMoveDelta < -10)) moveF -= 1;
+
+        // Desktop
+        if (keyStates['KeyW']) moveF += 1;
+        if (keyStates['KeyS']) moveF -= 1;
         if (keyStates['KeyA']) moveS -= 1;
         if (keyStates['KeyD']) moveS += 1;
+
+        // Mobile (Continuous movement while holding)
+        if (touchMode === 'WALK') {
+            moveF = walkDirection;
+        }
 
         if (moveF !== 0 || moveS !== 0) {
             const fX = Math.sin(yaw), fZ = Math.cos(yaw);
@@ -155,9 +161,10 @@ function animate() {
 }
 renderer.setAnimationLoop(animate);
 
-// --- 6. EVENTS ---
+// --- 5. EVENT LISTENERS ---
 document.addEventListener('keydown', (e) => keyStates[e.code] = true);
 document.addEventListener('keyup', (e) => keyStates[e.code] = false);
+
 document.addEventListener('mousemove', (e) => {
     if (document.pointerLockElement === document.body) {
         yaw -= e.movementX * 0.002;
@@ -165,23 +172,42 @@ document.addEventListener('mousemove', (e) => {
         pitch = Math.max(-1.5, Math.min(1.5, pitch));
     }
 });
+
+// Mobile Logic
 renderer.domElement.addEventListener('touchstart', (e) => {
     const t = e.touches[0];
-    lastTouchY = t.pageY; lastTouchX = t.pageX;
+    lastTouchY = t.pageY; 
+    lastTouchX = t.pageX;
+    // Split screen: left = Walk, right = Look
     touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
 }, { passive: false });
+
 renderer.domElement.addEventListener('touchmove', (e) => {
     e.preventDefault();
     const t = e.touches[0];
+    
     if (touchMode === 'LOOK') {
         yaw -= (t.pageX - lastTouchX) * 0.005;
         pitch -= (t.pageY - lastTouchY) * 0.005;
         pitch = Math.max(-1.5, Math.min(1.5, pitch));
-    } else { mobileMoveDelta = lastTouchY - t.pageY; }
-    lastTouchX = t.pageX; lastTouchY = t.pageY;
+        lastTouchX = t.pageX;
+        lastTouchY = t.pageY;
+    } else if (touchMode === 'WALK') {
+        // Calculate distance from start of touch
+        const deltaY = lastTouchY - t.pageY; 
+        if (deltaY > 20) walkDirection = 1;      // Swipe up & hold = Forward
+        else if (deltaY < -20) walkDirection = -1; // Swipe down & hold = Backward
+        else walkDirection = 0;                    // Deadzone
+    }
 }, { passive: false });
-renderer.domElement.addEventListener('touchend', () => { touchMode = null; mobileMoveDelta = 0; });
+
+renderer.domElement.addEventListener('touchend', () => { 
+    touchMode = null; 
+    walkDirection = 0; 
+});
+
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
