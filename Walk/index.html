@@ -4,10 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>3D Apartment Tour</title>
- <style>
+    <style>
         body { margin: 0; overflow: hidden; background-color: #e0e0e0; font-family: sans-serif; }
         
-        /* UPDATED: Added user-select to stop mobile text-selection highlights */
         canvas { 
             display: block; 
             touch-action: none; 
@@ -50,18 +49,12 @@
             text-transform: uppercase; letter-spacing: 1px; outline: none;
         }
 
-        /* NEW: This ensures the VR button is clickable and positioned correctly */
+        /* VR Button Positioning - Fixed Syntax Error */
         #XRButton {
             right: 20px !important;
             left: auto !important;
             bottom: 20px !important;
-
-            /* This targets the VR button specifically to prevent overlap */
-#XRButton {
-    right: 20px !important;
-    left: auto !important;
-    bottom: 20px !important;
-}
+            width: auto !important;
         }
     </style>
 </head>
@@ -73,7 +66,7 @@
     </div>
 
     <button id="home-btn">Reset View</button>
-    <div class="hud-label" id="walk-label">Hold Left to Walk</div>
+    <div class="hud-label" id="walk-label">Swipe & Hold to Walk</div>
     <div class="hud-label" id="turn-label">Swipe Right to Turn</div>
 
     <script type="importmap">
@@ -84,6 +77,6 @@
             }
         }
     </script>
-    <script type="module" src="main.js?v=6"></script>
+    <script type="module" src="main.js?v=8"></script>
 </body>
 </html>

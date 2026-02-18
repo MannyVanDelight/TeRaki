@@ -1,10 +1,22 @@
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/DRACOLoader.js';
-import { VRButton } from 'https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
+
+// RESTORED: Gradient Background
+const canvas = document.createElement('canvas');
+canvas.width = 2; canvas.height = 512;
+const context = canvas.getContext('2d');
+const gradient = context.createLinearGradient(0, 0, 0, 512);
+gradient.addColorStop(0, '#e0e0e0'); 
+gradient.addColorStop(1, '#444444'); 
+context.fillStyle = gradient;
+context.fillRect(0, 0, 2, 512);
+scene.background = new THREE.CanvasTexture(canvas);
+
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
 const cameraRig = new THREE.Group();
 cameraRig.add(camera);
@@ -28,17 +40,23 @@ let hasClipping = false;
 // Touch State
 let touchMode = null;
 let lastTouchX = 0, lastTouchY = 0;
-let walkDirection = 0; // 1 for forward, -1 for backward, 0 for stop
+let walkDirection = 0; 
 
 function goHome() {
     if (renderer.xr.isPresenting) {
+        // VR Mode: Position from Start object, Height from Floor object
         cameraRig.position.set(homeData.pos.x, vrFloorY, homeData.pos.z);
-        cameraRig.rotation.y = homeData.yaw;
+        // Rotation from Start object
+        cameraRig.rotation.set(0, homeData.yaw, 0);
     } else {
+        // Desktop Mode: All from Start object
         camera.position.copy(homeData.pos);
         cameraRig.position.set(0, 0, 0); 
+        cameraRig.rotation.set(0, 0, 0);
+        // Face 180 degrees from the wall
         yaw = homeData.yaw + Math.PI; 
         pitch = 0;
+        updateCameraRotation();
     }
 }
 
@@ -47,7 +65,7 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
     goHome();
 });
 
-// --- 3. VR & ASSETS (Same as before) ---
+// --- 3. VR & ASSETS ---
 const controller1 = renderer.xr.getController(0);
 const raycaster = new THREE.Raycaster();
 let intersectPoint = null;
@@ -73,7 +91,9 @@ loader.setDRACOLoader(dracoLoader);
 
 function processModel(gltf, isMain) {
     gltf.scene.traverse((child) => {
-        const name = child.name.toLowerCase();
+        // Use exact name match to avoid hiding "KitchenFloor" etc.
+        const name = child.name.toLowerCase(); 
+        
         if (isMain) {
             if (name.includes("start")) {
                 homeData.pos.copy(child.getWorldPosition(new THREE.Vector3()));
@@ -88,12 +108,15 @@ function processModel(gltf, isMain) {
                 if(child.material) child.material.visible = false; 
                 hasClipping = true;
             }
-            if (name.includes("floor")) {
+            // STRICT CHECK: Only the object named exactly "floor" is the invisible helper
+            if (name === "floor") {
                 vrFloorY = child.getWorldPosition(new THREE.Vector3()).y; 
                 child.userData.isVRFloor = true;
+                // Only hide THIS specific floor object
                 if(child.material) child.material.visible = false; 
             }
         }
+        
         if (child.isMesh && child.material && child.material.map) {
             child.material.emissive = new THREE.Color(0xffffff);
             child.material.emissiveMap = child.material.map;
@@ -127,30 +150,34 @@ function animate() {
         const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
         raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
         raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+        
+        // Raycast ONLY against the invisible VR helper floor
         const hit = raycaster.intersectObjects(scene.children, true).find(h => h.object.userData.isVRFloor);
         if (hit) {
             intersectPoint = hit.point; marker.position.copy(hit.point); marker.visible = true;
         } else { marker.visible = false; }
+        
     } else {
         const speed = 0.025;
         let moveF = 0, moveS = 0;
 
-        // Desktop
         if (keyStates['KeyW']) moveF += 1;
         if (keyStates['KeyS']) moveF -= 1;
-        if (keyStates['KeyA']) moveS -= 1;
+        if (keyStates['KeyA']) moveS -= 1; 
         if (keyStates['KeyD']) moveS += 1;
 
-        // Mobile (Continuous movement while holding)
         if (touchMode === 'WALK') {
             moveF = walkDirection;
         }
 
         if (moveF !== 0 || moveS !== 0) {
             const fX = Math.sin(yaw), fZ = Math.cos(yaw);
-            const rX = Math.sin(yaw + Math.PI/2), rZ = Math.cos(yaw + Math.PI/2);
+            // FIXED: Strafe math so A is Left and D is Right
+            const rX = Math.sin(yaw - Math.PI/2), rZ = Math.cos(yaw - Math.PI/2);
+            
             const nX = camera.position.x + (fX * moveF + rX * moveS) * speed;
             const nZ = camera.position.z + (fZ * moveF + rZ * moveS) * speed;
+            
             if (!hasClipping || clippingBox.containsPoint(new THREE.Vector3(nX, camera.position.y, nZ))) {
                 camera.position.x = nX; camera.position.z = nZ;
             }
@@ -162,6 +189,14 @@ function animate() {
 renderer.setAnimationLoop(animate);
 
 // --- 5. EVENT LISTENERS ---
+
+// RESTORED: Click to capture mouse (This makes the mouse work!)
+document.addEventListener('click', () => {
+    if (!renderer.xr.isPresenting) {
+        document.body.requestPointerLock();
+    }
+});
+
 document.addEventListener('keydown', (e) => keyStates[e.code] = true);
 document.addEventListener('keyup', (e) => keyStates[e.code] = false);
 
@@ -173,12 +208,11 @@ document.addEventListener('mousemove', (e) => {
     }
 });
 
-// Mobile Logic
+// Mobile Touch
 renderer.domElement.addEventListener('touchstart', (e) => {
     const t = e.touches[0];
     lastTouchY = t.pageY; 
     lastTouchX = t.pageX;
-    // Split screen: left = Walk, right = Look
     touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
 }, { passive: false });
 
@@ -193,11 +227,10 @@ renderer.domElement.addEventListener('touchmove', (e) => {
         lastTouchX = t.pageX;
         lastTouchY = t.pageY;
     } else if (touchMode === 'WALK') {
-        // Calculate distance from start of touch
         const deltaY = lastTouchY - t.pageY; 
-        if (deltaY > 20) walkDirection = 1;      // Swipe up & hold = Forward
-        else if (deltaY < -20) walkDirection = -1; // Swipe down & hold = Backward
-        else walkDirection = 0;                    // Deadzone
+        if (deltaY > 20) walkDirection = 1;      
+        else if (deltaY < -20) walkDirection = -1; 
+        else walkDirection = 0;                    
     }
 }, { passive: false });
 
@@ -206,8 +239,15 @@ renderer.domElement.addEventListener('touchend', () => {
     walkDirection = 0; 
 });
 
-window.addEventListener('resize', () => {
+function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+}
+window.addEventListener('resize', onWindowResize);
+
+// FIXED: Force aspect ratio reset when exiting VR
+renderer.xr.addEventListener('sessionend', () => {
+    goHome();
+    setTimeout(onWindowResize, 100);
 });
