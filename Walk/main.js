@@ -161,10 +161,11 @@ function animate() {
         const speed = 0.025;
         let moveF = 0, moveS = 0;
 
-        if (keyStates['KeyW']) moveF += 1;
-        if (keyStates['KeyS']) moveF -= 1;
-        if (keyStates['KeyA']) moveS -= 1; 
-        if (keyStates['KeyD']) moveS += 1;
+// Check for both WASD and Arrow Keys
+        if (keyStates['KeyW'] || keyStates['ArrowUp']) moveF += 1;
+        if (keyStates['KeyS'] || keyStates['ArrowDown']) moveF -= 1;
+        if (keyStates['KeyA'] || keyStates['ArrowLeft']) moveS -= 1;
+        if (keyStates['KeyD'] || keyStates['ArrowRight']) moveS += 1;
 
         if (touchMode === 'WALK') {
             moveF = walkDirection;
