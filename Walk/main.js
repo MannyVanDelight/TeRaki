@@ -362,9 +362,11 @@ dom.addEventListener('click', () => {
 
 // Desktop double-click teleport — detected manually so it also works while the pointer is locked
 let lastClickTime = 0, lastClickX = 0, lastClickY = 0;
-dom.addEventListener('mousedown', (e) => {
+document.addEventListener('mousedown', (e) => {
     if (menuOpen || renderer.xr.isPresenting || isTouch || e.button !== 0) return;
     const locked = document.pointerLockElement === document.body;
+    // Ignore clicks on the on-screen UI when the cursor is free
+    if (!locked && e.target.closest && e.target.closest('#topbar, #scrim, #VRButton, #XRButton')) return;
     const x = locked ? window.innerWidth / 2 : e.clientX;
     const y = locked ? window.innerHeight / 2 : e.clientY;
     const now = performance.now();
