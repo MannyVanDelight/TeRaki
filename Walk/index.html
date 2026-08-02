@@ -62,8 +62,8 @@
 
     /* ---------- Top bar ---------- */
     #topbar {
-        position: fixed; top: calc(16px + var(--safe-t)); left: 16px; right: 16px;
-        display: flex; align-items: flex-start; justify-content: space-between;
+        position: fixed; top: calc(16px + var(--safe-t)); left: calc(16px + env(safe-area-inset-left, 0px));
+        display: flex; align-items: center; gap: 10px;
         z-index: 40; pointer-events: none;
     }
     #topbar > * { pointer-events: auto; }
@@ -72,6 +72,7 @@
         width: 44px; height: 44px; padding: 0; justify-content: center;
         font-size: 15px; letter-spacing: 0; font-family: var(--mono);
     }
+    body.touch #bottom-hint, body.touch #crosshair { display: none !important; }
     #help-btn::after {
         content: ""; position: absolute; inset: -6px; border-radius: 999px;
         border: 1px solid var(--accent); opacity: 0; animation: none;
@@ -96,20 +97,20 @@
     .zone {
         position: absolute; top: 0; bottom: 0; width: 50%;
         display: flex; align-items: flex-end; justify-content: center;
-        padding-bottom: calc(104px + var(--safe-b));
+        padding-bottom: calc(86px + var(--safe-b));
     }
     .zone.left { left: 0; } .zone.right { right: 0; }
     .zone .card {
-        text-align: center; padding: 12px 18px; border-radius: 16px;
-        background: rgba(255,255,255,0.82); border: 1px solid var(--line);
-        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-        box-shadow: 0 8px 24px rgba(0,0,0,0.07);
-        transition: transform 0.2s ease, background 0.2s ease;
+        display: flex; align-items: center; gap: 7px;
+        padding: 6px 12px; border-radius: 999px;
+        background: rgba(255,255,255,0.6); border: 1px solid rgba(20,20,25,0.08);
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        opacity: 0.8; transition: opacity 0.2s ease, background 0.2s ease;
     }
-    .zone.active .card { background: #fff; transform: translateY(-4px); }
-    .zone .glyph { font-size: 18px; line-height: 1; color: var(--accent); }
-    .zone .title { margin-top: 8px; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; }
-    .zone .sub { margin-top: 4px; font-size: 10.5px; letter-spacing: 0.04em; color: var(--ink-soft); text-transform: none; }
+    .zone.active .card { background: rgba(255,255,255,0.9); opacity: 1; }
+    .zone .glyph { font-size: 12px; line-height: 1; color: var(--accent); }
+    .zone .title { font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; }
+    .zone .sub { display: none; }
 
     /* ---------- Bottom hint (desktop) ---------- */
     #bottom-hint {
@@ -222,7 +223,11 @@
         box-shadow: 0 10px 28px rgba(0,0,0,0.22) !important;
         white-space: nowrap !important; z-index: 45 !important;
     }
-    body.no-vr #VRButton, body.no-vr #XRButton { display: none !important; }
+    body.vr-off #VRButton, body.vr-off #XRButton {
+        background: rgba(255,255,255,0.7) !important; color: var(--ink-soft) !important;
+        border: 1px solid var(--line) !important; box-shadow: 0 4px 14px rgba(0,0,0,0.06) !important;
+        font-size: 10px !important;
+    }
 
     @media (max-width: 480px) {
         #menu { padding: 22px 20px 18px; border-radius: 20px; }
@@ -244,14 +249,12 @@
             <div class="card">
                 <div class="glyph">↕</div>
                 <div class="title">Move</div>
-                <div class="sub">hold &amp; swipe up / down</div>
             </div>
         </div>
         <div class="zone right" id="zone-right">
             <div class="card">
                 <div class="glyph">↔</div>
                 <div class="title">Look</div>
-                <div class="sub">drag to turn</div>
             </div>
         </div>
     </div>

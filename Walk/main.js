@@ -269,6 +269,7 @@ const zoneLeft = document.getElementById('zone-left');
 const zoneRight = document.getElementById('zone-right');
 
 const isTouch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+document.body.classList.toggle('touch', isTouch);
 let vrSupported = false;
 let menuOpen = true;
 let hintTimer = null;
@@ -308,6 +309,7 @@ function hideTouchHints() { clearTimeout(hintTimer); touchHints.classList.remove
 
 let bottomTimer = null;
 function showBottomHint(text, ms) {
+    if (isTouch) return;
     bottomHintText.textContent = text;
     bottomHint.classList.add('show');
     clearTimeout(bottomTimer);
@@ -329,7 +331,7 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
     if (navigator.xr && navigator.xr.isSessionSupported) {
         try { vrSupported = await navigator.xr.isSessionSupported('immersive-vr'); } catch (err) { vrSupported = false; }
     }
-    document.body.classList.toggle('no-vr', !vrSupported);
+    document.body.classList.toggle('vr-off', !vrSupported);
     const vrTab = document.getElementById('tab-vr');
     const badge = document.getElementById('mode-badge');
     const vrStatus = document.getElementById('vr-status');
