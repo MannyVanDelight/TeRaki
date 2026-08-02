@@ -360,13 +360,22 @@ dom.addEventListener('click', () => {
     }
 });
 
-// Desktop double-click teleport (uses the crosshair when the pointer is locked)
-dom.addEventListener('dblclick', (e) => {
-    if (menuOpen || renderer.xr.isPresenting) return;
+// Desktop double-click teleport — detected manually so it also works while the pointer is locked
+let lastClickTime = 0, lastClickX = 0, lastClickY = 0;
+dom.addEventListener('mousedown', (e) => {
+    if (menuOpen || renderer.xr.isPresenting || isTouch || e.button !== 0) return;
     const locked = document.pointerLockElement === document.body;
     const x = locked ? window.innerWidth / 2 : e.clientX;
     const y = locked ? window.innerHeight / 2 : e.clientY;
-    if (!teleportFromScreen(x, y)) showBottomHint('Aim at the floor to teleport', 2000);
+    const now = performance.now();
+    const near = Math.hypot(x - lastClickX, y - lastClickY) < 40;
+
+    if (now - lastClickTime < 360 && near) {
+        lastClickTime = 0;
+        if (!teleportFromScreen(x, y)) showBottomHint('Aim at the floor to teleport', 2000);
+    } else {
+        lastClickTime = now; lastClickX = x; lastClickY = y;
+    }
 });
 
 document.addEventListener('pointerlockchange', () => {
