@@ -268,8 +268,9 @@ const touchHints = document.getElementById('touch-hints');
 const zoneLeft = document.getElementById('zone-left');
 const zoneRight = document.getElementById('zone-right');
 
-const isTouch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+const isTouch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
 document.body.classList.toggle('touch', isTouch);
+window.addEventListener('touchstart', () => document.body.classList.add('touch'), { once: true, passive: true });
 let vrSupported = false;
 let menuOpen = true;
 let hintTimer = null;
@@ -332,20 +333,39 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         try { vrSupported = await navigator.xr.isSessionSupported('immersive-vr'); } catch (err) { vrSupported = false; }
     }
     document.body.classList.toggle('vr-off', !vrSupported);
+    const vrBtn = document.getElementById('VRButton') || document.getElementById('XRButton');
+    if (vrBtn) {
+        const tidy = () => {
+            const txt = (vrBtn.textContent || '').toUpperCase();
+            if (!vrSupported || txt.includes('NOT')) {
+                if (vrBtn.textContent !== 'VR not detected') vrBtn.textContent = 'VR not detected';
+                vrBtn.onclick = null; // VRButton otherwise navigates to an external WebXR page
+                vrBtn.style.cursor = 'default';
+                document.body.classList.add('vr-off');
+            }
+        };
+        new MutationObserver(tidy).observe(vrBtn, { childList: true, characterData: true, subtree: true });
+        tidy();
+        vrBtn.addEventListener('click', (e) => {
+            if (vrSupported) return;
+            e.preventDefault(); e.stopPropagation();
+            showBottomHint('No headset detected — connect a VR headset and reload', 3500);
+        }, true);
+    }
     const vrTab = document.getElementById('tab-vr');
     const badge = document.getElementById('mode-badge');
     const vrStatus = document.getElementById('vr-status');
 
     if (!vrSupported) {
         vrTab.disabled = true;
-        vrStatus.textContent = 'No headset detected on this device. Open this tour in a VR browser and the Enter VR button appears automatically.';
+        vrStatus.textContent = 'No headset detected on this device. Open this tour in a VR browser and the Enter VR button activates automatically.';
     } else {
         vrStatus.textContent = 'A headset was detected on this device — you are ready to go.';
     }
 
-    if (vrSupported) { badge.textContent = 'VR headset ready'; setTab('vr'); }
-    else if (isTouch) { badge.textContent = 'Touch controls'; setTab('touch'); }
-    else { badge.textContent = 'Mouse & keyboard'; setTab('desktop'); }
+    if (vrSupported) { if (badge) badge.textContent = 'VR headset ready'; setTab('vr'); }
+    else if (isTouch) { if (badge) badge.textContent = 'Touch controls'; setTab('touch'); }
+    else { if (badge) badge.textContent = 'Mouse & keyboard'; setTab('desktop'); }
 })();
 
 // --- 7. EVENT LISTENERS ---
