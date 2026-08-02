@@ -2,68 +2,232 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>3D Apartment Tour</title>
 <style>
-    body { margin: 0; overflow: hidden; background-color: #e0e0e0; font-family: sans-serif; }
-    
-    canvas { 
-        display: block; 
-        touch-action: none; 
-        user-select: none; 
-        -webkit-user-select: none; 
-        -webkit-touch-callout: none; 
+    :root {
+        --ink: #1e1e1f;
+        --ink-soft: #5c5c60;
+        --paper: rgba(255,255,255,0.86);
+        --line: rgba(20,20,25,0.12);
+        --accent: oklch(0.55 0.075 250);
+        --sans: "Helvetica Neue", Helvetica, "Segoe UI", sans-serif;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --safe-t: env(safe-area-inset-top, 0px);
+        --safe-b: env(safe-area-inset-bottom, 0px);
     }
 
-    /* Loading Screen */
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background-color: #e0e0e0; font-family: var(--sans); color: var(--ink); -webkit-tap-highlight-color: transparent; }
+
+    canvas {
+        display: block;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+    }
+
+    button { font-family: inherit; }
+
+    /* ---------- Loading ---------- */
     #loader {
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        position: fixed; inset: 0;
         background: #e0e0e0; display: flex; flex-direction: column;
         justify-content: center; align-items: center; z-index: 100;
-        transition: opacity 0.5s ease;
+        transition: opacity 0.6s ease; gap: 18px;
     }
+    #loader.gone { opacity: 0; pointer-events: none; }
     .spinner {
-        width: 40px; height: 40px; border: 4px solid rgba(0,0,0,0.1);
-        border-top: 4px solid #444; border-radius: 50%;
-        animation: spin 1s linear infinite;
+        width: 34px; height: 34px; border: 2px solid rgba(0,0,0,0.12);
+        border-top-color: var(--ink); border-radius: 50%;
+        animation: spin 0.9s linear infinite;
     }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loader p { margin: 0; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-soft); }
 
-    /* HUD Overlay Labels */
-    .hud-label {
-        position: fixed; bottom: 40px; width: 50%;
-        text-align: center; color: rgba(0, 0, 0, 0.3);
-        font-size: 10px; text-transform: uppercase;
-        letter-spacing: 2px; pointer-events: none; user-select: none;
-        z-index: 10;
+    /* ---------- Shared pill styling ---------- */
+    .pill {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 10px 16px; border-radius: 999px;
+        background: var(--paper); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border: 1px solid var(--line); color: var(--ink);
+        font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+        cursor: pointer; outline: none;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+        transition: transform 0.18s ease, background 0.18s ease, opacity 0.3s ease;
     }
-    #walk-label { left: 0; }
-    #turn-label { right: 0; }
+    .pill:hover { background: #fff; transform: translateY(-1px); }
+    .pill:active { transform: translateY(0) scale(0.98); }
 
-    /* Home Button - MOVED UP TO AVOID OVERLAP */
-    #home-btn {
-        position: fixed; 
-        top: 30px; /* Increased from 30px to 100px */
-        left: 50%; 
-        transform: translateX(-50%);
-        padding: 10px 20px; 
-        background: rgba(255, 255, 255, 0.8);
-        border: 1px solid rgba(0, 0, 0, 0.1); 
-        border-radius: 20px;
-        color: #444; 
-        font-size: 11px; 
-        cursor: pointer; 
-        z-index: 20;
-        text-transform: uppercase; 
-        letter-spacing: 1px; 
-        outline: none;
+    /* ---------- Top bar ---------- */
+    #topbar {
+        position: fixed; top: calc(16px + var(--safe-t)); left: 16px; right: 16px;
+        display: flex; align-items: flex-start; justify-content: space-between;
+        z-index: 40; pointer-events: none;
+    }
+    #topbar > * { pointer-events: auto; }
+
+    #help-btn {
+        width: 44px; height: 44px; padding: 0; justify-content: center;
+        font-size: 15px; letter-spacing: 0; font-family: var(--mono);
+    }
+    #help-btn::after {
+        content: ""; position: absolute; inset: -6px; border-radius: 999px;
+        border: 1px solid var(--accent); opacity: 0; animation: none;
+    }
+    #help-btn { position: relative; }
+    #help-btn.nudge::after { animation: ping 2.2s ease-out 3; }
+    @keyframes ping {
+        0% { opacity: 0.5; transform: scale(0.9); }
+        70%, 100% { opacity: 0; transform: scale(1.35); }
     }
 
-    /* VR Button Styling */
-    #XRButton {
-        width: auto !important;
-        white-space: nowrap !important;
-        z-index: 25 !important; /* Ensure it sits on top if they do touch */
+    /* ---------- Touch zone hints ---------- */
+    #touch-hints {
+        position: fixed; inset: 0; z-index: 15; pointer-events: none;
+        opacity: 0; transition: opacity 0.45s ease;
+    }
+    #touch-hints.show { opacity: 1; }
+    #touch-hints .divider {
+        position: absolute; top: 22%; bottom: 22%; left: 50%; width: 1px;
+        background: linear-gradient(to bottom, transparent, rgba(20,20,25,0.18), transparent);
+    }
+    .zone {
+        position: absolute; top: 0; bottom: 0; width: 50%;
+        display: flex; align-items: flex-end; justify-content: center;
+        padding-bottom: calc(104px + var(--safe-b));
+    }
+    .zone.left { left: 0; } .zone.right { right: 0; }
+    .zone .card {
+        text-align: center; padding: 12px 18px; border-radius: 16px;
+        background: rgba(255,255,255,0.82); border: 1px solid var(--line);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.07);
+        transition: transform 0.2s ease, background 0.2s ease;
+    }
+    .zone.active .card { background: #fff; transform: translateY(-4px); }
+    .zone .glyph { font-size: 18px; line-height: 1; color: var(--accent); }
+    .zone .title { margin-top: 8px; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; }
+    .zone .sub { margin-top: 4px; font-size: 10.5px; letter-spacing: 0.04em; color: var(--ink-soft); text-transform: none; }
+
+    /* ---------- Bottom hint (desktop) ---------- */
+    #bottom-hint {
+        position: fixed; left: 50%; transform: translateX(-50%);
+        bottom: calc(96px + var(--safe-b)); z-index: 18;
+        display: flex; align-items: center; gap: 14px;
+        padding: 10px 18px; border-radius: 999px;
+        background: var(--paper); border: 1px solid var(--line);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.07);
+        font-size: 11px; letter-spacing: 0.06em; color: var(--ink-soft);
+        opacity: 0; pointer-events: none; transition: opacity 0.4s ease;
+        white-space: nowrap;
+    }
+    #bottom-hint.show { opacity: 1; }
+    kbd {
+        font-family: var(--mono); font-size: 10px; letter-spacing: 0;
+        padding: 3px 6px; border-radius: 5px; color: var(--ink);
+        background: rgba(20,20,25,0.06); border: 1px solid var(--line);
+    }
+
+    /* ---------- Crosshair ---------- */
+    #crosshair {
+        position: fixed; top: 50%; left: 50%; width: 6px; height: 6px;
+        margin: -3px 0 0 -3px; border-radius: 50%;
+        background: rgba(255,255,255,0.9); box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+        z-index: 12; opacity: 0; transition: opacity 0.25s ease; pointer-events: none;
+    }
+    #crosshair.show { opacity: 1; }
+
+    /* ---------- Guide menu ---------- */
+    #scrim {
+        position: fixed; inset: 0; z-index: 200;
+        background: rgba(228,228,230,0.55);
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        display: flex; align-items: flex-start; justify-content: center;
+        padding: 20px; opacity: 1; transition: opacity 0.3s ease;
+        overflow-y: auto;
+    }
+    #scrim.hidden { opacity: 0; pointer-events: none; }
+
+    #menu {
+        width: min(460px, 100%);
+        margin: auto;
+        max-height: calc(100dvh - 40px);
+        display: flex; flex-direction: column;
+        background: rgba(255,255,255,0.94);
+        border: 1px solid var(--line); border-radius: 24px;
+        box-shadow: 0 30px 70px rgba(0,0,0,0.16);
+        padding: 26px 26px 22px;
+        transform: translateY(0) scale(1); transition: transform 0.3s cubic-bezier(.2,.8,.3,1);
+    }
+    #scrim.hidden #menu { transform: translateY(10px) scale(0.98); }
+
+    .menu-head { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .menu-head h1 { margin: 0; font-size: 20px; font-weight: 500; letter-spacing: -0.01em; }
+    .menu-head .badge {
+        margin-top: 8px; display: inline-flex; align-items: center; gap: 7px;
+        font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
+    }
+    .menu-head .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    #menu-close {
+        flex: none; width: 34px; height: 34px; border-radius: 50%;
+        border: 1px solid var(--line); background: transparent; color: var(--ink-soft);
+        font-size: 15px; line-height: 1; cursor: pointer;
+    }
+    #menu-close:hover { background: rgba(20,20,25,0.05); color: var(--ink); }
+
+    #panels { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .tabs { flex: none; display: flex; gap: 6px; margin: 20px 0 18px; padding: 4px; background: rgba(20,20,25,0.05); border-radius: 12px; }
+    .tab {
+        flex: 1; padding: 9px 6px; border: none; border-radius: 9px; background: transparent;
+        font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft);
+        cursor: pointer; transition: background 0.18s ease, color 0.18s ease;
+    }
+    .tab[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
+    .tab[disabled] { opacity: 0.4; cursor: default; }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .row { display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 13px 0; border-top: 1px solid rgba(20,20,25,0.08); align-items: start; }
+    .row:first-child { border-top: none; padding-top: 2px; }
+    .row .glyph { font-size: 17px; line-height: 1.2; color: var(--accent); text-align: center; }
+    .row h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 500; }
+    .row p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); text-wrap: pretty; }
+    .row .keys { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+
+    .menu-foot { flex: none; margin-top: 22px; display: flex; align-items: center; gap: 12px; }
+    #menu-start {
+        flex: 1; justify-content: center; background: var(--ink); color: #fff; border-color: var(--ink);
+        padding: 14px 20px;
+    }
+    #menu-start:hover { background: #000; }
+    .menu-foot .note { font-size: 10.5px; letter-spacing: 0.04em; color: var(--ink-soft); }
+
+    /* ---------- VR button ---------- */
+    #VRButton, #XRButton {
+        position: fixed !important;
+        left: 50% !important; right: auto !important;
+        transform: translateX(-50%) !important;
+        bottom: calc(28px + var(--safe-b)) !important;
+        width: auto !important; height: auto !important;
+        padding: 13px 26px !important;
+        background: var(--ink) !important; color: #fff !important;
+        border: none !important; border-radius: 999px !important;
+        font-family: var(--sans) !important; font-size: 11px !important;
+        letter-spacing: 0.16em !important; text-transform: uppercase !important;
+        opacity: 1 !important; cursor: pointer !important;
+        box-shadow: 0 10px 28px rgba(0,0,0,0.22) !important;
+        white-space: nowrap !important; z-index: 45 !important;
+    }
+    body.no-vr #VRButton, body.no-vr #XRButton { display: none !important; }
+
+    @media (max-width: 480px) {
+        #menu { padding: 22px 20px 18px; border-radius: 20px; }
+        .menu-head h1 { font-size: 18px; }
+        .row p { font-size: 13px; }
     }
 </style>
 </head>
@@ -71,12 +235,158 @@
 
     <div id="loader">
         <div class="spinner"></div>
-        <p style="margin-top: 20px; color: #444;">Entering Apartment...</p>
+        <p>Entering apartment</p>
     </div>
 
-    <button id="home-btn">Reset View</button>
-    <div class="hud-label" id="walk-label">Swipe & Hold to Walk</div>
-    <div class="hud-label" id="turn-label">Swipe Right to Turn</div>
+    <div id="touch-hints">
+        <div class="divider"></div>
+        <div class="zone left" id="zone-left">
+            <div class="card">
+                <div class="glyph">↕</div>
+                <div class="title">Move</div>
+                <div class="sub">hold &amp; swipe up / down</div>
+            </div>
+        </div>
+        <div class="zone right" id="zone-right">
+            <div class="card">
+                <div class="glyph">↔</div>
+                <div class="title">Look</div>
+                <div class="sub">drag to turn</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <div id="bottom-hint">
+        <span id="bottom-hint-text">Click to look around</span>
+    </div>
+
+    <div id="topbar">
+        <button class="pill" id="home-btn">Reset view</button>
+        <button class="pill" id="help-btn" aria-label="How to explore">?</button>
+    </div>
+
+    <div id="scrim">
+        <div id="menu" role="dialog" aria-modal="true" aria-label="How to explore">
+            <div class="menu-head">
+                <div>
+                    <h1>How to explore</h1>
+                    <div class="badge"><span class="dot"></span><span id="mode-badge">Detecting input</span></div>
+                </div>
+                <button id="menu-close" aria-label="Close">✕</button>
+            </div>
+
+            <div class="tabs" role="tablist">
+                <button class="tab" role="tab" data-tab="touch">Touch</button>
+                <button class="tab" role="tab" data-tab="desktop">Desktop</button>
+                <button class="tab" role="tab" data-tab="vr" id="tab-vr">VR</button>
+            </div>
+
+            <div id="panels">
+            <div class="panel" data-panel="touch">
+                <div class="row">
+                    <div class="glyph">↕</div>
+                    <div>
+                        <h3>Walk</h3>
+                        <p>Hold anywhere on the <strong>left half</strong> of the screen and swipe up to walk forward, down to step back.</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">↔</div>
+                    <div>
+                        <h3>Look around</h3>
+                        <p>Drag on the <strong>right half</strong> of the screen to turn your head.</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">◎</div>
+                    <div>
+                        <h3>Teleport</h3>
+                        <p>Double-tap any spot on the floor to jump straight there.</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">⟲</div>
+                    <div>
+                        <h3>Start over</h3>
+                        <p>Tap <strong>Reset view</strong> top left to return to the entrance.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel" data-panel="desktop">
+                <div class="row">
+                    <div class="glyph">◍</div>
+                    <div>
+                        <h3>Look around</h3>
+                        <p>Click anywhere on the scene to capture the mouse, then move it to look around.</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">↕</div>
+                    <div>
+                        <h3>Walk</h3>
+                        <p>Use the arrow keys or WASD to move through the apartment.</p>
+                        <div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span class="note" style="font-size:10.5px;color:var(--ink-soft);align-self:center">or</span><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">◎</div>
+                    <div>
+                        <h3>Teleport</h3>
+                        <p>Double-click a spot on the floor to jump straight there.</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">⎋</div>
+                    <div>
+                        <h3>Release the cursor</h3>
+                        <p>Press Esc to get your pointer back and use the buttons on screen.</p>
+                        <div class="keys"><kbd>Esc</kbd></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel" data-panel="vr">
+                <div class="row">
+                    <div class="glyph">◈</div>
+                    <div>
+                        <h3>Headset</h3>
+                        <p id="vr-status">A connected headset is detected automatically.</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">▣</div>
+                    <div>
+                        <h3>Enter VR</h3>
+                        <p>Press the <strong>Enter VR</strong> button at the bottom of the screen to start the immersive session.</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">◎</div>
+                    <div>
+                        <h3>Teleport</h3>
+                        <p>Point your controller at the floor — a green ring appears — then pull the trigger to move there.</p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="glyph">⟲</div>
+                    <div>
+                        <h3>Leaving VR</h3>
+                        <p>Exit the session and the view returns to the entrance automatically.</p>
+                    </div>
+                </div>
+            </div>
+
+            </div>
+
+            <div class="menu-foot">
+                <button class="pill" id="menu-start">Start exploring</button>
+                <span class="note">Reopen with <strong>?</strong> top right</span>
+            </div>
+        </div>
+    </div>
 
     <script type="importmap">
         {
@@ -86,6 +396,6 @@
             }
         }
     </script>
-    <script type="module" src="main.js?v=8"></script>
+    <script type="module" src="main.js?v=9"></script>
 </body>
 </html>
