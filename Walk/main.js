@@ -37,16 +37,13 @@ let vrFloorY = 0;
 let clippingBox = new THREE.Box3();
 let hasClipping = false;
 
-// Touch State
-let touchMode = null;
-let lastTouchX = 0, lastTouchY = 0;
+// Touch State (walkDirection is driven by the left-half touch "stick")
 let walkDirection = 0;
 
 function goHome() {
     cancelTeleport();
     if (renderer.xr.isPresenting) {
-        cameraRig.position.set(homeData.pos.x, vrFloorY, homeData.pos.z);
-        cameraRig.rotation.set(0, homeData.yaw, 0);
+        vrHome();
     } else {
         camera.position.copy(homeData.pos);
         cameraRig.position.set(0, 0, 0);
@@ -58,16 +55,59 @@ function goHome() {
 }
 
 // --- 3. VR & ASSETS ---
-const controller1 = renderer.xr.getController(0);
 const raycaster = new THREE.Raycaster();
-let intersectPoint = null;
+const vrRaycaster = new THREE.Raycaster();
+const floorMeshes = []; // meshes named "floor" — the only valid VR teleport targets
+const _v = new THREE.Vector3();
+const _m = new THREE.Matrix4();
 
-const marker = new THREE.Mesh(
-    new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 })
-);
-marker.visible = false;
-scene.add(marker);
+const markerGeo = new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2);
+const markerMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
+const vrMarkers = [];
+
+// Place the rig so the HEAD (not the play-space origin) lands on the target point
+function placeHeadAt(x, y, z) {
+    camera.getWorldPosition(_v);
+    cameraRig.position.x += x - _v.x;
+    cameraRig.position.z += z - _v.z;
+    cameraRig.position.y = y;
+}
+
+function vrHome() {
+    cameraRig.rotation.set(0, homeData.yaw, 0);
+    cameraRig.position.set(homeData.pos.x, vrFloorY, homeData.pos.z);
+    cameraRig.updateMatrixWorld(true);
+    placeHeadAt(homeData.pos.x, vrFloorY, homeData.pos.z);
+}
+
+// Both controllers can aim + teleport; each gets a pointer ray and its own marker
+const controllers = [0, 1].map((i) => {
+    const c = renderer.xr.getController(i);
+    const ray = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
+        new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })
+    );
+    ray.scale.z = 5;
+    c.add(ray);
+
+    const m = new THREE.Mesh(markerGeo, markerMat);
+    m.visible = false;
+    scene.add(m);
+    vrMarkers.push(m);
+
+    c.userData.hitPoint = null;
+    c.userData.marker = m;
+    c.userData.ray = ray;
+    c.addEventListener('selectstart', () => {
+        const p = c.userData.hitPoint;
+        if (p) placeHeadAt(p.x, p.y, p.z);
+    });
+    cameraRig.add(c);
+    return c;
+});
+
+let vrRecentreFrames = 0;
+function hideVRMarkers() { vrMarkers.forEach(m => { m.visible = false; }); }
 
 // Ping ring shown where a touch / click teleport lands
 const pingRing = new THREE.Mesh(
@@ -78,13 +118,6 @@ pingRing.renderOrder = 10;
 pingRing.visible = false;
 scene.add(pingRing);
 let pingLife = 0;
-
-controller1.addEventListener('selectstart', () => {
-    if (intersectPoint && marker.visible) {
-        cameraRig.position.set(intersectPoint.x, intersectPoint.y, intersectPoint.z);
-    }
-});
-cameraRig.add(controller1);
 
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
@@ -113,6 +146,7 @@ function processModel(gltf, isMain) {
                 vrFloorY = child.getWorldPosition(new THREE.Vector3()).y;
                 child.userData.isVRFloor = true;
                 if (child.material) child.material.visible = false;
+                child.traverse(o => { if (o.isMesh) { o.userData.isVRFloor = true; floorMeshes.push(o); } });
             }
         }
 
@@ -153,7 +187,7 @@ function pickFloorPoint(clientX, clientY) {
         -(clientY / window.innerHeight) * 2 + 1
     );
     raycaster.setFromCamera(ndc, camera);
-    const hits = raycaster.intersectObjects(scene.children, true).filter(h => h.object !== marker && h.object !== pingRing);
+    const hits = raycaster.intersectObjects(scene.children, true).filter(h => h.object !== pingRing && !vrMarkers.includes(h.object));
     if (!hits.length) return null;
 
     // Prefer the dedicated invisible floor helper, then any near-horizontal surface below eye level
@@ -203,14 +237,30 @@ function animate() {
     const dt = Math.min(clock.getDelta(), 0.1);
 
     if (renderer.xr.isPresenting) {
-        const tempMatrix = new THREE.Matrix4().extractRotation(controller1.matrixWorld);
-        raycaster.ray.origin.setFromMatrixPosition(controller1.matrixWorld);
-        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+        if (vrRecentreFrames > 0 && --vrRecentreFrames === 0) vrHome();
 
-        const hit = raycaster.intersectObjects(scene.children, true).find(h => h.object.userData.isVRFloor);
-        if (hit) {
-            intersectPoint = hit.point; marker.position.copy(hit.point); marker.visible = true;
-        } else { marker.visible = false; }
+        // Only the (invisible) floor meshes are raycast — cheap enough for standalone headsets
+        for (const c of controllers) {
+            const m = c.userData.marker;
+            c.userData.hitPoint = null;
+            m.visible = false;
+            if (!c.visible || !floorMeshes.length) continue;
+
+            _m.extractRotation(c.matrixWorld);
+            vrRaycaster.ray.origin.setFromMatrixPosition(c.matrixWorld);
+            vrRaycaster.ray.direction.set(0, 0, -1).applyMatrix4(_m);
+            const hit = vrRaycaster.intersectObjects(floorMeshes, false)[0];
+            if (!hit) { c.userData.ray.scale.z = 5; continue; }
+
+            c.userData.ray.scale.z = hit.distance;
+            // Respect the same walkable bounds as desktop/touch
+            if (hasClipping && !clippingBox.containsPoint(_v.set(hit.point.x, homeData.pos.y, hit.point.z))) continue;
+
+            c.userData.hitPoint = hit.point.clone();
+            m.position.copy(hit.point);
+            m.position.y += 0.01;
+            m.visible = true;
+        }
 
     } else {
         const speed = 1.5; // units per second
@@ -221,7 +271,7 @@ function animate() {
         if (keyStates['KeyA'] || keyStates['ArrowLeft']) moveS -= 1;
         if (keyStates['KeyD'] || keyStates['ArrowRight']) moveS += 1;
 
-        if (touchMode === 'WALK') moveF = walkDirection;
+        if (walkDirection !== 0) moveF = walkDirection;
 
         if (moveF !== 0 || moveS !== 0) {
             cancelTeleport();
@@ -268,9 +318,24 @@ const touchHints = document.getElementById('touch-hints');
 const zoneLeft = document.getElementById('zone-left');
 const zoneRight = document.getElementById('zone-right');
 
-const isTouch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
-document.body.classList.toggle('touch', isTouch);
-window.addEventListener('touchstart', () => document.body.classList.add('touch'), { once: true, passive: true });
+// Input mode follows whatever the person is actually using. The old check
+// (maxTouchPoints / 'ontouchstart') flagged touchscreen laptops and many
+// desktop browsers as "touch" and switched the mouse off entirely.
+let inputMode = window.matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse';
+document.body.classList.toggle('touch', inputMode === 'touch');
+function setInputMode(mode) {
+    if (mode === inputMode) return;
+    inputMode = mode;
+    document.body.classList.toggle('touch', mode === 'touch');
+    if (mode === 'touch') {
+        bottomHint.classList.remove('show');
+        crosshair.classList.remove('show');
+    }
+}
+window.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') setInputMode('touch');
+    else if (e.pointerType === 'mouse' || e.pointerType === 'pen') setInputMode('mouse');
+}, { capture: true, passive: true });
 let vrSupported = false;
 let menuOpen = true;
 let hintTimer = null;
@@ -297,8 +362,8 @@ function closeMenu() {
     menuOpen = false;
     scrim.classList.add('hidden');
     helpBtn.classList.add('nudge');
-    if (isTouch) showTouchHints(4500);
-    else showBottomHint('Click the scene to look around', 5000);
+    if (inputMode === 'touch') showTouchHints(4500);
+    else showBottomHint('Click the scene to look around · or click-drag', 5000);
 }
 
 function showTouchHints(ms) {
@@ -310,7 +375,7 @@ function hideTouchHints() { clearTimeout(hintTimer); touchHints.classList.remove
 
 let bottomTimer = null;
 function showBottomHint(text, ms) {
-    if (isTouch) return;
+    if (inputMode === 'touch') return;
     bottomHintText.textContent = text;
     bottomHint.classList.add('show');
     clearTimeout(bottomTimer);
@@ -364,122 +429,195 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
     }
 
     if (vrSupported) { if (badge) badge.textContent = 'VR headset ready'; setTab('vr'); }
-    else if (isTouch) { if (badge) badge.textContent = 'Touch controls'; setTab('touch'); }
+    else if (inputMode === 'touch') { if (badge) badge.textContent = 'Touch controls'; setTab('touch'); }
     else { if (badge) badge.textContent = 'Mouse & keyboard'; setTab('desktop'); }
 })();
 
 // --- 7. EVENT LISTENERS ---
 const dom = renderer.domElement;
+const isLocked = () => document.pointerLockElement === document.body;
+const clampPitch = () => { pitch = Math.max(-1.5, Math.min(1.5, pitch)); };
 
-// Click the scene to capture the mouse (desktop)
-dom.addEventListener('click', () => {
-    if (menuOpen || renderer.xr.isPresenting || isTouch) return;
-    if (!document.pointerLockElement) {
-        const p = document.body.requestPointerLock();
-        if (p && p.catch) p.catch(() => {});
-    }
-});
-
-// Desktop double-click teleport — detected manually so it also works while the pointer is locked
+// ---- Desktop mouse ----
+// Click (no drag) = capture the mouse for free-look.
+// Click-and-drag = look around without capturing (also the fallback when
+// pointer lock is blocked, e.g. inside an iframe or right after Esc in Chrome).
+// Double-click = teleport (at the centre dot when captured, at the cursor when not).
+const drag = { id: null, x: 0, y: 0, sx: 0, sy: 0, moved: false, type: 'mouse' };
 let lastClickTime = 0, lastClickX = 0, lastClickY = 0;
-document.addEventListener('mousedown', (e) => {
-    if (menuOpen || renderer.xr.isPresenting || isTouch || e.button !== 0) return;
-    const locked = document.pointerLockElement === document.body;
-    // Ignore clicks on the on-screen UI when the cursor is free
-    if (!locked && e.target.closest && e.target.closest('#topbar, #scrim, #VRButton, #XRButton')) return;
-    const x = locked ? window.innerWidth / 2 : e.clientX;
-    const y = locked ? window.innerHeight / 2 : e.clientY;
+let lockTimer = null;
+
+function handleClickAt(x, y) {
     const now = performance.now();
     const near = Math.hypot(x - lastClickX, y - lastClickY) < 40;
-
     if (now - lastClickTime < 360 && near) {
         lastClickTime = 0;
         if (!teleportFromScreen(x, y)) showBottomHint('Aim at the floor to teleport', 2000);
-    } else {
-        lastClickTime = now; lastClickX = x; lastClickY = y;
+        return true; // was a double-click
     }
+    lastClickTime = now; lastClickX = x; lastClickY = y;
+    return false;
+}
+
+function requestLock() {
+    if (!document.body.requestPointerLock) return;
+    try {
+        const p = document.body.requestPointerLock();
+        if (p && p.catch) p.catch(() => showBottomHint('Drag to look around · double-click the floor to teleport', 3500));
+    } catch (err) { /* fall back to drag-look */ }
+}
+
+document.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.button !== 0) return;
+    if (menuOpen || renderer.xr.isPresenting) return;
+
+    if (isLocked()) {
+        handleClickAt(window.innerWidth / 2, window.innerHeight / 2);
+        return;
+    }
+    if (e.target !== dom) return; // on-screen UI, menu, VR button
+    drag.id = e.pointerId; drag.type = e.pointerType;
+    drag.x = drag.sx = e.clientX; drag.y = drag.sy = e.clientY;
+    drag.moved = false;
+    try { dom.setPointerCapture(e.pointerId); } catch (err) {}
+    cancelTeleport();
 });
 
+document.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== drag.id || isLocked()) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 5) {
+        drag.moved = true;
+        dom.style.cursor = 'grabbing';
+    }
+    if (drag.moved) {
+        yaw -= (e.clientX - drag.x) * 0.004;
+        pitch -= (e.clientY - drag.y) * 0.004;
+        clampPitch();
+    }
+    drag.x = e.clientX; drag.y = e.clientY;
+});
+
+function endDrag(e) {
+    if (e.pointerId !== drag.id) return;
+    const wasClick = !drag.moved && e.type === 'pointerup';
+    drag.id = null;
+    dom.style.cursor = '';
+    if (!wasClick || menuOpen || renderer.xr.isPresenting) return;
+    const wasDouble = handleClickAt(e.clientX, e.clientY);
+    clearTimeout(lockTimer);
+    // Single click with a real mouse captures it for free-look — after the
+    // double-click window, so a double-click at the cursor still teleports
+    if (!wasDouble && drag.type === 'mouse' && !isLocked()) {
+        lockTimer = setTimeout(() => { if (!menuOpen && !renderer.xr.isPresenting) requestLock(); }, 380);
+    }
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
+
 document.addEventListener('pointerlockchange', () => {
-    const locked = document.pointerLockElement === document.body;
-    crosshair.classList.toggle('show', locked && !isTouch);
+    const locked = isLocked();
+    crosshair.classList.toggle('show', locked && inputMode === 'mouse');
     if (locked) showBottomHint('Double-click the floor to teleport · Esc releases the cursor', 4000);
-    else if (!menuOpen && !isTouch) showBottomHint('Click the scene to look around', 4000);
+    else if (!menuOpen) showBottomHint('Click the scene to look around · or click-drag', 4000);
+});
+document.addEventListener('pointerlockerror', () => {
+    showBottomHint('Drag to look around · double-click the floor to teleport', 3500);
+});
+
+document.addEventListener('mousemove', (e) => {
+    if (!isLocked()) return;
+    // Clamp occasional spikes some browsers report under pointer lock
+    const dx = Math.max(-150, Math.min(150, e.movementX || 0));
+    const dy = Math.max(-150, Math.min(150, e.movementY || 0));
+    yaw -= dx * 0.002;
+    pitch -= dy * 0.002;
+    clampPitch();
 });
 
 document.addEventListener('keydown', (e) => {
     keyStates[e.code] = true;
     if (e.code === 'Escape' && menuOpen) closeMenu();
     if ((e.code === 'Slash' && e.shiftKey) || e.code === 'KeyH') menuOpen ? closeMenu() : openMenu();
+    // Stop arrow keys / space from activating a focused button behind the scene
+    if (!menuOpen && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
-document.addEventListener('keyup', (e) => keyStates[e.code] = false);
+document.addEventListener('keyup', (e) => { keyStates[e.code] = false; });
+// Clear held keys if the window loses focus (otherwise you keep walking)
+window.addEventListener('blur', () => { for (const k in keyStates) keyStates[k] = false; });
 
-document.addEventListener('mousemove', (e) => {
-    if (document.pointerLockElement === document.body) {
-        yaw -= e.movementX * 0.002;
-        pitch -= e.movementY * 0.002;
-        pitch = Math.max(-1.5, Math.min(1.5, pitch));
-    }
-});
-
-// --- Mobile Touch ---
-let tapStart = { x: 0, y: 0, time: 0, moved: false };
+// ---- Touch (two independent thumbs: left = walk, right = look) ----
+const walkT = { id: null, startY: 0 };
+const lookT = { id: null, x: 0, y: 0 };
+let tapStart = null;
 let lastTap = { x: 0, y: 0, time: 0 };
 
 dom.addEventListener('touchstart', (e) => {
-    if (menuOpen) return;
-    const t = e.touches[0];
-    lastTouchY = t.pageY;
-    lastTouchX = t.pageX;
-    touchMode = (t.pageX < window.innerWidth / 2) ? 'WALK' : 'LOOK';
-    tapStart = { x: t.pageX, y: t.pageY, time: performance.now(), moved: false };
+    if (menuOpen || renderer.xr.isPresenting) return;
+    e.preventDefault(); // no synthetic mouse events / zoom
+    setInputMode('touch');
     cancelTeleport();
 
+    for (const t of e.changedTouches) {
+        const leftSide = t.clientX < window.innerWidth / 2;
+        if (leftSide && walkT.id === null) {
+            walkT.id = t.identifier; walkT.startY = t.clientY;
+            zoneLeft.classList.add('active');
+        } else if (!leftSide && lookT.id === null) {
+            lookT.id = t.identifier; lookT.x = t.clientX; lookT.y = t.clientY;
+            zoneRight.classList.add('active');
+        }
+    }
+
+    const t0 = e.changedTouches[0];
+    tapStart = e.touches.length === 1
+        ? { id: t0.identifier, x: t0.clientX, y: t0.clientY, time: performance.now(), moved: false }
+        : null;
     showTouchHints(0);
-    (touchMode === 'WALK' ? zoneLeft : zoneRight).classList.add('active');
 }, { passive: false });
 
 dom.addEventListener('touchmove', (e) => {
-    if (menuOpen) return;
+    if (menuOpen || renderer.xr.isPresenting) return;
     e.preventDefault();
-    const t = e.touches[0];
+    for (const t of e.changedTouches) {
+        if (tapStart && t.identifier === tapStart.id &&
+            Math.hypot(t.clientX - tapStart.x, t.clientY - tapStart.y) > 14) tapStart.moved = true;
 
-    if (Math.hypot(t.pageX - tapStart.x, t.pageY - tapStart.y) > 14) tapStart.moved = true;
-
-    if (touchMode === 'LOOK') {
-        yaw -= (t.pageX - lastTouchX) * 0.005;
-        pitch -= (t.pageY - lastTouchY) * 0.005;
-        pitch = Math.max(-1.5, Math.min(1.5, pitch));
-        lastTouchX = t.pageX;
-        lastTouchY = t.pageY;
-    } else if (touchMode === 'WALK') {
-        const deltaY = lastTouchY - t.pageY;
-        if (deltaY > 20) walkDirection = 1;
-        else if (deltaY < -20) walkDirection = -1;
-        else walkDirection = 0;
+        if (t.identifier === walkT.id) {
+            const deltaY = walkT.startY - t.clientY;
+            walkDirection = deltaY > 20 ? 1 : deltaY < -20 ? -1 : 0;
+        } else if (t.identifier === lookT.id) {
+            yaw -= (t.clientX - lookT.x) * 0.005;
+            pitch -= (t.clientY - lookT.y) * 0.005;
+            clampPitch();
+            lookT.x = t.clientX; lookT.y = t.clientY;
+        }
     }
 }, { passive: false });
 
-dom.addEventListener('touchend', (e) => {
-    touchMode = null;
-    walkDirection = 0;
-    zoneLeft.classList.remove('active');
-    zoneRight.classList.remove('active');
-    showTouchHints(2500);
-    if (menuOpen || renderer.xr.isPresenting) return;
+function onTouchEnd(e) {
+    let tapped = null;
+    for (const t of e.changedTouches) {
+        if (t.identifier === walkT.id) { walkT.id = null; walkDirection = 0; zoneLeft.classList.remove('active'); }
+        if (t.identifier === lookT.id) { lookT.id = null; zoneRight.classList.remove('active'); }
+        if (tapStart && t.identifier === tapStart.id) tapped = tapStart;
+    }
+    if (e.touches.length === 0) showTouchHints(2500);
+    if (e.type !== 'touchend' || !tapped || menuOpen || renderer.xr.isPresenting) return;
+    tapStart = null;
 
     const now = performance.now();
-    const isTap = !tapStart.moved && (now - tapStart.time) < 260;
-    if (!isTap) return;
+    if (tapped.moved || now - tapped.time >= 260) return;
 
-    const closeToLast = Math.hypot(tapStart.x - lastTap.x, tapStart.y - lastTap.y) < 40;
+    const closeToLast = Math.hypot(tapped.x - lastTap.x, tapped.y - lastTap.y) < 40;
     if (now - lastTap.time < 320 && closeToLast) {
         lastTap.time = 0;
-        if (!teleportFromScreen(tapStart.x, tapStart.y)) showTouchHints(2500);
+        if (!teleportFromScreen(tapped.x, tapped.y)) showTouchHints(2500);
     } else {
-        lastTap = { x: tapStart.x, y: tapStart.y, time: now };
+        lastTap = { x: tapped.x, y: tapped.y, time: now };
     }
-});
+}
+dom.addEventListener('touchend', onTouchEnd);
+dom.addEventListener('touchcancel', onTouchEnd);
 
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -491,9 +629,20 @@ window.addEventListener('resize', onWindowResize);
 renderer.xr.addEventListener('sessionstart', () => {
     if (menuOpen) closeMenu();
     hideTouchHints();
+    bottomHint.classList.remove('show');
+    cancelTeleport();
+    walkDirection = 0;
+    for (const k in keyStates) keyStates[k] = false;
+    // Start the headset at the entrance, facing the right way. The real head
+    // pose only arrives with the first XR frames, so re-centre once it has.
+    camera.position.set(0, 0, 0);
+    camera.quaternion.identity();
+    vrHome();
+    vrRecentreFrames = 3;
 });
 
 renderer.xr.addEventListener('sessionend', () => {
+    hideVRMarkers();
     goHome();
     setTimeout(onWindowResize, 100);
 });
