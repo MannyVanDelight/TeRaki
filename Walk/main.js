@@ -439,10 +439,10 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         const tidy = () => {
             const txt = (vrBtn.textContent || '').toUpperCase();
             if (!vrSupported || txt.includes('NOT')) {
-                const label = vrReason || 'VR not detected';
+                const label = vrReason === 'VR blocked by embed' ? 'Open in new tab for VR' : (vrReason || 'VR not detected');
                 if (vrBtn.textContent !== label) vrBtn.textContent = label;
                 vrBtn.onclick = null; // VRButton otherwise navigates to an external WebXR page
-                vrBtn.style.cursor = 'default';
+                vrBtn.style.cursor = vrReason === 'VR blocked by embed' ? 'pointer' : 'default';
                 document.body.classList.add('vr-off');
             }
         };
@@ -451,6 +451,12 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         vrBtn.addEventListener('click', (e) => {
             if (vrSupported) return;
             e.preventDefault(); e.stopPropagation();
+            // Embedded without VR permission: open the tour on its own, where VR is allowed
+            if (vrReason === 'VR blocked by embed') {
+                const w = window.open(location.href, '_blank', 'noopener');
+                if (!w) showBottomHint('Pop-up blocked — open the tour address directly in a new tab for VR', 5000);
+                return;
+            }
             showBottomHint(vrReason === 'VR needs HTTPS'
                 ? 'This page is on plain http:// — browsers only allow VR on https:// or localhost'
                 : vrReason === 'Browser has no WebXR'
