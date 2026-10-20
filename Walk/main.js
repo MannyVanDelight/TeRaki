@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
@@ -35,18 +34,13 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
-// three.js r160's VRButton also calls navigator.xr.offerSession() on load. In current
-// Chrome that pending "offered" session blocks the real one: clicking Enter VR then fails
-// with "There is already an active, immersive XRSession". Hide offerSession so only the
-// button click starts VR.
-if (navigator.xr && 'offerSession' in navigator.xr) {
-    try { Object.defineProperty(navigator.xr, 'offerSession', { value: undefined, configurable: true }); } catch (err) {}
-}
-
-// On http:// or non-WebXR browsers three.js returns a plain link with no id — give it one
-const vrButtonEl = VRButton.createButton(renderer);
-if (!vrButtonEl.id) vrButtonEl.id = 'VRButton';
+// Own Enter VR button (replaces three.js's VRButton, which stalls silently and then
+// lets a second click request a second session → "already an active immersive XRSession")
+const vrButtonEl = document.createElement('button');
+vrButtonEl.id = 'VRButton';
+vrButtonEl.textContent = 'Enter VR';
 document.body.appendChild(vrButtonEl);
+let vrEyeOffset = 0; // 1.6 m when the headset only offers head-relative ('local') tracking
 
 // --- 2. STATE ---
 let yaw = 0, pitch = 0;
@@ -88,7 +82,7 @@ function placeHeadAt(x, y, z) {
     camera.getWorldPosition(_v);
     cameraRig.position.x += x - _v.x;
     cameraRig.position.z += z - _v.z;
-    cameraRig.position.y = y;
+    cameraRig.position.y = y + vrEyeOffset;
 }
 
 function vrHome() {
@@ -386,23 +380,6 @@ window.addEventListener('pointerdown', (e) => {
     else if (e.pointerType === 'mouse' || e.pointerType === 'pen') setInputMode('mouse');
 }, { capture: true, passive: true });
 let vrSupported = false;
-// three.js's Enter VR button gives no feedback if the headset refuses the session.
-// Watch the browser's actual answer (no timers — the "Allow VR?" prompt can take any time).
-if (navigator.xr && navigator.xr.requestSession) {
-    const origRequestSession = navigator.xr.requestSession.bind(navigator.xr);
-    navigator.xr.requestSession = (mode, init) => {
-        const req = origRequestSession(mode, init);
-        req.then(
-            () => console.info('[tour] VR session started'),
-            (err) => {
-                const msg = (err && (err.name + ' — ' + err.message)) || String(err);
-                console.warn('[tour] VR session failed:', msg);
-                showBottomHint('VR failed to start: ' + msg, 12000);
-            }
-        );
-        return req;
-    };
-}
 let menuOpen = true;
 let hintTimer = null;
 
@@ -511,13 +488,7 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         new MutationObserver(tidy).observe(vrBtn, { childList: true, characterData: true, subtree: true });
         tidy();
         vrBtn.addEventListener('click', (e) => {
-            if (vrSupported) {
-                if (!renderer.xr.isPresenting) {
-                    vrAttemptAt = performance.now();
-                    showBottomHint('Starting VR — allow it if the browser asks, then put the headset on', 6000);
-                }
-                return;
-            }
+            if (vrSupported) return; // startVR() handles it
             e.preventDefault(); e.stopPropagation();
             // Embedded without VR permission: open the tour on its own, where VR is allowed
             if (vrReason === 'VR blocked by embed') {
@@ -755,6 +726,58 @@ function onWindowResize() {
     renderer.setSize(window.innerWidth, window.innerHeight);
 }
 window.addEventListener('resize', onWindowResize);
+
+// --- Enter / exit VR, one step at a time, each with a timeout and a clear message ---
+let xrSession = null;
+let xrStarting = false;
+function withTimeout(promise, ms, step) {
+    return Promise.race([promise, new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('timed out while ' + step)), ms))]);
+}
+async function startVR() {
+    if (!vrSupported) return;                      // unsupported case is handled by the hint listener
+    if (xrSession) { xrSession.end(); return; }    // button doubles as Exit VR
+    if (xrStarting) { showBottomHint('VR is already starting — check the headset', 3000); return; }
+
+    xrStarting = true;
+    vrAttemptAt = performance.now();
+    vrButtonEl.textContent = 'Starting VR…';
+    showBottomHint('Allow VR if the browser asks, then put the headset on', 8000);
+    let session = null;
+    try {
+        // No timeout here: the browser's permission prompt can take as long as the person needs
+        session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+
+        const gl = renderer.getContext();
+        const attrs = gl.getContextAttributes();
+        if (!attrs || !attrs.xrCompatible) {
+            await withTimeout(gl.makeXRCompatible(), 10000, 'connecting the graphics card to the headset (set the browser to the High performance GPU in Windows graphics settings)');
+        }
+
+        let refType = 'local-floor';
+        try { await withTimeout(session.requestReferenceSpace('local-floor'), 5000, 'setting up floor tracking'); }
+        catch (e) { refType = 'local'; }
+        vrEyeOffset = refType === 'local' ? 1.6 : 0;
+        renderer.xr.setReferenceSpaceType(refType);
+
+        await withTimeout(renderer.xr.setSession(session), 10000, 'starting the VR view');
+        xrSession = session;
+        session.addEventListener('end', () => { xrSession = null; vrButtonEl.textContent = 'Enter VR'; });
+        vrButtonEl.textContent = 'Exit VR';
+        console.info('[tour] VR started (' + refType + ')');
+    } catch (err) {
+        const msg = (err && err.name === 'InvalidStateError')
+            ? 'another VR session is still open — close other tabs that used VR, or restart the browser, then try again'
+            : (err && err.message) ? err.message : String(err);
+        reportVRProblem(msg);
+        // Release a half-started session so the next click can try again cleanly
+        if (session) { try { await session.end(); } catch (e) {} }
+        vrButtonEl.textContent = 'Enter VR';
+    } finally {
+        xrStarting = false;
+    }
+}
+vrButtonEl.addEventListener('click', startVR);
 
 renderer.xr.addEventListener('sessionstart', () => {
     // Live readout on the desktop screen while the headset is in VR
