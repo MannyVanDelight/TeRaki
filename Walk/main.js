@@ -28,7 +28,10 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
+// On http:// or non-WebXR browsers three.js returns a plain link with no id — give it one
+const vrButtonEl = VRButton.createButton(renderer);
+if (!vrButtonEl.id) vrButtonEl.id = 'VRButton';
+document.body.appendChild(vrButtonEl);
 
 // --- 2. STATE ---
 let yaw = 0, pitch = 0;
@@ -394,16 +397,31 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
 
 // Detect input mode and preselect the right tab
 (async function detectMode() {
-    if (navigator.xr && navigator.xr.isSessionSupported) {
+    // Work out WHY VR is unavailable, so the button/menu can say so
+    let vrReason = '';
+    if (!window.isSecureContext) {
+        vrReason = 'VR needs HTTPS';
+    } else if (!navigator.xr || !navigator.xr.isSessionSupported) {
+        vrReason = 'Browser has no WebXR';
+    } else {
         try { vrSupported = await navigator.xr.isSessionSupported('immersive-vr'); } catch (err) { vrSupported = false; }
+        if (!vrSupported) vrReason = 'VR not detected';
+        // Headset switched on / Link started after the page loaded → reload once it appears
+        navigator.xr.addEventListener('devicechange', async () => {
+            let now = false;
+            try { now = await navigator.xr.isSessionSupported('immersive-vr'); } catch (err) {}
+            if (now && !vrSupported) location.reload();
+        });
     }
+    console.info('[tour] VR check:', vrSupported ? 'supported' : vrReason, '| secure:', window.isSecureContext, '| navigator.xr:', !!navigator.xr);
     document.body.classList.toggle('vr-off', !vrSupported);
     const vrBtn = document.getElementById('VRButton') || document.getElementById('XRButton');
     if (vrBtn) {
         const tidy = () => {
             const txt = (vrBtn.textContent || '').toUpperCase();
             if (!vrSupported || txt.includes('NOT')) {
-                if (vrBtn.textContent !== 'VR not detected') vrBtn.textContent = 'VR not detected';
+                const label = vrReason || 'VR not detected';
+                if (vrBtn.textContent !== label) vrBtn.textContent = label;
                 vrBtn.onclick = null; // VRButton otherwise navigates to an external WebXR page
                 vrBtn.style.cursor = 'default';
                 document.body.classList.add('vr-off');
@@ -414,7 +432,11 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         vrBtn.addEventListener('click', (e) => {
             if (vrSupported) return;
             e.preventDefault(); e.stopPropagation();
-            showBottomHint('No headset detected — connect a VR headset and reload', 3500);
+            showBottomHint(vrReason === 'VR needs HTTPS'
+                ? 'This page is on plain http:// — browsers only allow VR on https:// or localhost'
+                : vrReason === 'Browser has no WebXR'
+                ? 'This browser has no WebXR — use Chrome, Edge or the Meta Quest Browser'
+                : 'No headset detected — start Link (or put the headset on) and the page will reload', 5000);
         }, true);
     }
     const vrTab = document.getElementById('tab-vr');
@@ -422,8 +444,12 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
     const vrStatus = document.getElementById('vr-status');
 
     if (!vrSupported) {
-        vrTab.disabled = true;
-        vrStatus.textContent = 'No headset detected on this device. Open this tour in a VR browser and the Enter VR button activates automatically.';
+        // Tab stays enabled so the reason below can actually be read
+        vrStatus.textContent = vrReason === 'VR needs HTTPS'
+            ? 'VR is blocked because this page is served over plain http://. Browsers only allow WebXR on https:// addresses (or http://localhost on the same machine).'
+            : vrReason === 'Browser has no WebXR'
+            ? 'This browser does not support WebXR. Use Chrome or Edge on PC (with Link running), or the Meta Quest Browser in the headset.'
+            : 'No headset detected. On PC, start Link and make Meta Horizon Link the active OpenXR runtime — the page reloads by itself when the headset appears.';
     } else {
         vrStatus.textContent = 'A headset was detected on this device — you are ready to go.';
     }
