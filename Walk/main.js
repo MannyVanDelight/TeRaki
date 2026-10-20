@@ -22,7 +22,14 @@ const cameraRig = new THREE.Group();
 cameraRig.add(camera);
 scene.add(cameraRig);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// Create the WebGL context VR-ready on the high-performance GPU up front. Otherwise
+// entering VR has to migrate the context to the headset's GPU mid-way, which can stall
+// on PCs with two GPUs (headset shows "loading" forever).
+const glCanvas = document.createElement('canvas');
+const glContext = glCanvas.getContext('webgl2', { antialias: true, xrCompatible: true, powerPreference: 'high-performance' });
+const renderer = glContext
+    ? new THREE.WebGLRenderer({ canvas: glCanvas, context: glContext, antialias: true, powerPreference: 'high-performance' })
+    : new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -244,8 +251,37 @@ function updateCameraRotation() {
     camera.lookAt(camera.position.x + fX, camera.position.y + fY, camera.position.z + fZ);
 }
 
+// --- VR diagnostics: count frames actually sent to the headset, catch silent errors ---
+let xrFrames = 0;
+let vrAttemptAt = 0;
+let xrStatusTimer = null;
+let lastFrameError = '';
+function reportVRProblem(msg) {
+    console.warn('[tour] VR problem:', msg);
+    showBottomHint('VR problem: ' + msg, 15000);
+}
+function vrErrorRelevant() { return renderer.xr.isPresenting || (performance.now() - vrAttemptAt < 60000 && vrAttemptAt > 0); }
+window.addEventListener('unhandledrejection', (e) => {
+    if (!vrErrorRelevant()) return;
+    const r = e.reason;
+    reportVRProblem((r && (r.name + ' — ' + r.message)) || String(r));
+});
+window.addEventListener('error', (e) => {
+    if (!vrErrorRelevant()) return;
+    reportVRProblem(e.message || String(e.error));
+});
+
 function animate() {
+    try { animateFrame(); }
+    catch (err) {
+        const msg = (err && (err.name + ' — ' + err.message)) || String(err);
+        if (msg !== lastFrameError) { lastFrameError = msg; reportVRProblem('frame error: ' + msg); console.error(err); }
+    }
+}
+
+function animateFrame() {
     const dt = Math.min(clock.getDelta(), 0.1);
+    if (renderer.xr.isPresenting) xrFrames++;
 
     if (renderer.xr.isPresenting) {
         if (vrRecentreFrames > 0 && --vrRecentreFrames === 0) vrHome();
@@ -476,7 +512,10 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         tidy();
         vrBtn.addEventListener('click', (e) => {
             if (vrSupported) {
-                if (!renderer.xr.isPresenting) showBottomHint('Starting VR — allow it if the browser asks, then put the headset on', 6000);
+                if (!renderer.xr.isPresenting) {
+                    vrAttemptAt = performance.now();
+                    showBottomHint('Starting VR — allow it if the browser asks, then put the headset on', 6000);
+                }
                 return;
             }
             e.preventDefault(); e.stopPropagation();
@@ -718,6 +757,19 @@ function onWindowResize() {
 window.addEventListener('resize', onWindowResize);
 
 renderer.xr.addEventListener('sessionstart', () => {
+    // Live readout on the desktop screen while the headset is in VR
+    xrFrames = 0;
+    clearInterval(xrStatusTimer);
+    const started = performance.now();
+    xrStatusTimer = setInterval(() => {
+        const secs = Math.round((performance.now() - started) / 1000);
+        const ref = renderer.xr.getReferenceSpace() ? 'yes' : 'no';
+        if (xrFrames === 0 && secs >= 4) {
+            reportVRProblem('session started but no frames reached the headset after ' + secs + 's (reference space: ' + ref + ')');
+        } else if (xrFrames > 0) {
+            showBottomHint('VR running · ' + xrFrames + ' frames sent to headset · ' + secs + 's', 1500);
+        }
+    }, 1000);
     if (menuOpen) closeMenu();
     hideTouchHints();
     bottomHint.classList.remove('show');
@@ -733,6 +785,8 @@ renderer.xr.addEventListener('sessionstart', () => {
 });
 
 renderer.xr.addEventListener('sessionend', () => {
+    clearInterval(xrStatusTimer);
+    vrAttemptAt = 0;
     hideVRMarkers();
     goHome();
     setTimeout(onWindowResize, 100);
