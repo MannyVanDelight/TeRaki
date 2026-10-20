@@ -342,14 +342,23 @@ window.addEventListener('pointerdown', (e) => {
     else if (e.pointerType === 'mouse' || e.pointerType === 'pen') setInputMode('mouse');
 }, { capture: true, passive: true });
 let vrSupported = false;
-let vrStartPending = false;
-// Surface the real error if the headset rejects the VR session
-window.addEventListener('unhandledrejection', (e) => {
-    if (!vrStartPending) return;
-    const r = e.reason;
-    vrStartPending = false;
-    showBottomHint('VR failed to start: ' + ((r && (r.name + ' — ' + r.message)) || String(r)), 10000);
-});
+// three.js's Enter VR button gives no feedback if the headset refuses the session.
+// Watch the browser's actual answer (no timers — the "Allow VR?" prompt can take any time).
+if (navigator.xr && navigator.xr.requestSession) {
+    const origRequestSession = navigator.xr.requestSession.bind(navigator.xr);
+    navigator.xr.requestSession = (mode, init) => {
+        const req = origRequestSession(mode, init);
+        req.then(
+            () => console.info('[tour] VR session started'),
+            (err) => {
+                const msg = (err && (err.name + ' — ' + err.message)) || String(err);
+                console.warn('[tour] VR session failed:', msg);
+                showBottomHint('VR failed to start: ' + msg, 12000);
+            }
+        );
+        return req;
+    };
+}
 let menuOpen = true;
 let hintTimer = null;
 
@@ -459,15 +468,7 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         tidy();
         vrBtn.addEventListener('click', (e) => {
             if (vrSupported) {
-                // three.js gives no feedback if the headset refuses or never answers
-                vrStartPending = true;
-                showBottomHint('Starting VR — put the headset on…', 4000);
-                setTimeout(() => {
-                    if (vrStartPending && !renderer.xr.isPresenting) {
-                        showBottomHint('The headset did not start VR. Check Link is showing its home space in the headset, then try again.', 8000);
-                    }
-                    vrStartPending = false;
-                }, 6000);
+                if (!renderer.xr.isPresenting) showBottomHint('Starting VR — allow it if the browser asks, then put the headset on', 6000);
                 return;
             }
             e.preventDefault(); e.stopPropagation();
@@ -709,7 +710,6 @@ function onWindowResize() {
 window.addEventListener('resize', onWindowResize);
 
 renderer.xr.addEventListener('sessionstart', () => {
-    vrStartPending = false;
     if (menuOpen) closeMenu();
     hideTouchHints();
     bottomHint.classList.remove('show');
