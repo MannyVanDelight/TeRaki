@@ -324,7 +324,9 @@ const zoneRight = document.getElementById('zone-right');
 // Input mode follows whatever the person is actually using. The old check
 // (maxTouchPoints / 'ontouchstart') flagged touchscreen laptops and many
 // desktop browsers as "touch" and switched the mouse off entirely.
-let inputMode = window.matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse';
+// Headset browsers (Quest, Pico, Wolvic) report a "coarse" pointer like phones — never treat them as mobile
+const isHeadsetBrowser = /OculusBrowser|Quest|Pico|Wolvic/i.test(navigator.userAgent);
+let inputMode = (!isHeadsetBrowser && window.matchMedia('(pointer: coarse)').matches) ? 'touch' : 'mouse';
 document.body.classList.toggle('touch', inputMode === 'touch');
 function setInputMode(mode) {
     if (mode === inputMode) return;
@@ -399,13 +401,21 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
 (async function detectMode() {
     // Work out WHY VR is unavailable, so the button/menu can say so
     let vrReason = '';
+    let xrError = '';
+    let embedded = false;
+    try { embedded = window.self !== window.top; } catch (err) { embedded = true; }
+    const policyAllows = (document.featurePolicy && document.featurePolicy.allowsFeature)
+        ? document.featurePolicy.allowsFeature('xr-spatial-tracking') : null;
     if (!window.isSecureContext) {
         vrReason = 'VR needs HTTPS';
     } else if (!navigator.xr || !navigator.xr.isSessionSupported) {
         vrReason = 'Browser has no WebXR';
+    } else if (policyAllows === false) {
+        vrReason = 'VR blocked by embed';
     } else {
-        try { vrSupported = await navigator.xr.isSessionSupported('immersive-vr'); } catch (err) { vrSupported = false; }
-        if (!vrSupported) vrReason = 'VR not detected';
+        try { vrSupported = await navigator.xr.isSessionSupported('immersive-vr'); }
+        catch (err) { vrSupported = false; xrError = (err && (err.name + ': ' + err.message)) || String(err); }
+        if (!vrSupported) vrReason = (xrError && embedded) ? 'VR blocked by embed' : 'VR not detected';
         // Headset switched on / Link started after the page loaded → reload once it appears
         navigator.xr.addEventListener('devicechange', async () => {
             let now = false;
@@ -413,7 +423,16 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
             if (now && !vrSupported) location.reload();
         });
     }
-    console.info('[tour] VR check:', vrSupported ? 'supported' : vrReason, '| secure:', window.isSecureContext, '| navigator.xr:', !!navigator.xr);
+    const yes = (b) => (b ? 'yes' : 'no');
+    const vrDiag = 'Details — address: ' + location.protocol + '//' + location.host +
+        ' · secure: ' + yes(window.isSecureContext) +
+        ' · WebXR: ' + yes(!!navigator.xr) +
+        ' · embedded: ' + yes(embedded) +
+        ' · xr policy: ' + (policyAllows === null ? 'n/a' : yes(policyAllows)) +
+        ' · headset browser: ' + yes(isHeadsetBrowser) +
+        (xrError ? ' · error: ' + xrError : '') +
+        ' · result: ' + (vrSupported ? 'supported' : vrReason);
+    console.info('[tour] ' + vrDiag + ' | UA: ' + navigator.userAgent);
     document.body.classList.toggle('vr-off', !vrSupported);
     const vrBtn = document.getElementById('VRButton') || document.getElementById('XRButton');
     if (vrBtn) {
@@ -436,6 +455,8 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
                 ? 'This page is on plain http:// — browsers only allow VR on https:// or localhost'
                 : vrReason === 'Browser has no WebXR'
                 ? 'This browser has no WebXR — use Chrome, Edge or the Meta Quest Browser'
+                : vrReason === 'VR blocked by embed'
+                ? 'The page embedding this tour blocks VR — open the tour on its own'
                 : 'No headset detected — start Link (or put the headset on) and the page will reload', 5000);
         }, true);
     }
@@ -449,12 +470,19 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
             ? 'VR is blocked because this page is served over plain http://. Browsers only allow WebXR on https:// addresses (or http://localhost on the same machine).'
             : vrReason === 'Browser has no WebXR'
             ? 'This browser does not support WebXR. Use Chrome or Edge on PC (with Link running), or the Meta Quest Browser in the headset.'
+            : vrReason === 'VR blocked by embed'
+            ? 'This tour is embedded in another page that does not allow VR. Add allow="xr-spatial-tracking; fullscreen" to the <iframe> tag, or open the tour on its own.'
             : 'No headset detected. On PC, start Link and make Meta Horizon Link the active OpenXR runtime — the page reloads by itself when the headset appears.';
     } else {
         vrStatus.textContent = 'A headset was detected on this device — you are ready to go.';
     }
+    // Always show the raw check results under the message, so problems can be pinned down
+    const diagEl = document.createElement('span');
+    diagEl.style.cssText = 'display:block;margin-top:8px;font-family:var(--mono);font-size:10.5px;line-height:1.5;word-break:break-word;';
+    diagEl.textContent = vrDiag;
+    vrStatus.appendChild(diagEl);
 
-    if (vrSupported) { if (badge) badge.textContent = 'VR headset ready'; setTab('vr'); }
+    if (vrSupported || isHeadsetBrowser) { if (badge) badge.textContent = vrSupported ? 'VR headset ready' : 'VR check'; setTab('vr'); }
     else if (inputMode === 'touch') { if (badge) badge.textContent = 'Touch controls'; setTab('touch'); }
     else { if (badge) badge.textContent = 'Mouse & keyboard'; setTab('desktop'); }
 })();
