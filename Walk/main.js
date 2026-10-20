@@ -28,6 +28,14 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
+// three.js r160's VRButton also calls navigator.xr.offerSession() on load. In current
+// Chrome that pending "offered" session blocks the real one: clicking Enter VR then fails
+// with "There is already an active, immersive XRSession". Hide offerSession so only the
+// button click starts VR.
+if (navigator.xr && 'offerSession' in navigator.xr) {
+    try { Object.defineProperty(navigator.xr, 'offerSession', { value: undefined, configurable: true }); } catch (err) {}
+}
+
 // On http:// or non-WebXR browsers three.js returns a plain link with no id — give it one
 const vrButtonEl = VRButton.createButton(renderer);
 if (!vrButtonEl.id) vrButtonEl.id = 'VRButton';
