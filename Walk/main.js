@@ -85,6 +85,35 @@ function placeHeadAt(x, y, z) {
     cameraRig.position.y = y + vrEyeOffset;
 }
 
+// Floor level for VR teleport when the model has no mesh named "floor"
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _hitP = new THREE.Vector3();
+function detectFloorHeight(root) {
+    if (floorMeshes.length) { floorPlane.constant = -vrFloorY; return; }
+    // Look straight down from the start point for the first upward-facing surface
+    const down = new THREE.Raycaster(homeData.pos.clone(), new THREE.Vector3(0, -1, 0), 0, 10);
+    root.updateMatrixWorld(true);
+    const hit = down.intersectObject(root, true).find(h => h.face &&
+        h.face.normal.clone().transformDirection(h.object.matrixWorld).y > 0.6);
+    vrFloorY = hit ? hit.point.y : homeData.pos.y - 1.6;
+    floorPlane.constant = -vrFloorY;
+    console.info('[tour] VR floor height:', vrFloorY.toFixed(3), hit ? '(from ' + hit.object.name + ')' : '(estimated)');
+}
+// One full raycast on trigger press: is a wall between the controller and the target?
+const blockRay = new THREE.Raycaster();
+function vrPathBlocked(c, target) {
+    blockRay.ray.origin.setFromMatrixPosition(c.matrixWorld);
+    blockRay.ray.direction.copy(target).sub(blockRay.ray.origin);
+    const dist = blockRay.ray.direction.length();
+    blockRay.ray.direction.normalize();
+    blockRay.far = dist - 0.05;
+    const hits = blockRay.intersectObjects(scene.children, true).filter(h =>
+        h.object.isMesh && h.object !== pingRing && !vrMarkers.includes(h.object) &&
+        h.object.visible && h.object.material && h.object.material.visible !== false);
+    // Something solid in the way that isn't itself floor-like → blocked
+    return hits.some(h => !h.face || h.face.normal.clone().transformDirection(h.object.matrixWorld).y < 0.6);
+}
+
 function vrHome() {
     cameraRig.rotation.set(0, homeData.yaw, 0);
     cameraRig.position.set(homeData.pos.x, vrFloorY, homeData.pos.z);
@@ -102,7 +131,7 @@ const controllers = [0, 1].map((i) => {
     ray.scale.z = 5;
     c.add(ray);
 
-    const m = new THREE.Mesh(markerGeo, markerMat);
+    const m = new THREE.Mesh(markerGeo, markerMat.clone()); // own material so it can flash red
     m.visible = false;
     scene.add(m);
     vrMarkers.push(m);
@@ -112,7 +141,12 @@ const controllers = [0, 1].map((i) => {
     c.userData.ray = ray;
     c.addEventListener('selectstart', () => {
         const p = c.userData.hitPoint;
-        if (p) placeHeadAt(p.x, p.y, p.z);
+        if (!p) return;
+        if (!floorMeshes.length && vrPathBlocked(c, p)) {    // don't teleport through walls/furniture
+            c.userData.blockedUntil = performance.now() + 450;
+            return;
+        }
+        placeHeadAt(p.x, p.y, p.z);
     });
     cameraRig.add(c);
     return c;
@@ -170,7 +204,7 @@ function processModel(gltf, isMain) {
         }
     });
     scene.add(gltf.scene);
-    if (isMain) goHome();
+    if (isMain) { detectFloorHeight(gltf.scene); goHome(); }
 }
 
 function hideLoader() {
@@ -280,17 +314,24 @@ function animateFrame() {
     if (renderer.xr.isPresenting) {
         if (vrRecentreFrames > 0 && --vrRecentreFrames === 0) vrHome();
 
-        // Only the (invisible) floor meshes are raycast — cheap enough for standalone headsets
+        // Aim: a mesh named "floor" if the model has one, otherwise a flat plane at the
+        // detected floor height (cheap — no per-frame raycast against the whole model)
         for (const c of controllers) {
             const m = c.userData.marker;
             c.userData.hitPoint = null;
             m.visible = false;
-            if (!c.visible || !floorMeshes.length) continue;
+            if (!c.visible) continue;
 
             _m.extractRotation(c.matrixWorld);
             vrRaycaster.ray.origin.setFromMatrixPosition(c.matrixWorld);
             vrRaycaster.ray.direction.set(0, 0, -1).applyMatrix4(_m);
-            const hit = vrRaycaster.intersectObjects(floorMeshes, false)[0];
+            let hit = null;
+            if (floorMeshes.length) {
+                hit = vrRaycaster.intersectObjects(floorMeshes, false)[0] || null;
+            } else if (vrRaycaster.ray.intersectPlane(floorPlane, _hitP)) {
+                const d = _hitP.distanceTo(vrRaycaster.ray.origin);
+                if (d < 20) hit = { point: _hitP.clone(), distance: d };
+            }
             if (!hit) { c.userData.ray.scale.z = 5; continue; }
 
             c.userData.ray.scale.z = hit.distance;
@@ -300,6 +341,7 @@ function animateFrame() {
             c.userData.hitPoint = hit.point.clone();
             m.position.copy(hit.point);
             m.position.y += 0.01;
+            m.material.color.setHex(performance.now() < (c.userData.blockedUntil || 0) ? 0xff3b30 : 0x00ff00);
             m.visible = true;
         }
 
