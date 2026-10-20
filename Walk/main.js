@@ -342,6 +342,14 @@ window.addEventListener('pointerdown', (e) => {
     else if (e.pointerType === 'mouse' || e.pointerType === 'pen') setInputMode('mouse');
 }, { capture: true, passive: true });
 let vrSupported = false;
+let vrStartPending = false;
+// Surface the real error if the headset rejects the VR session
+window.addEventListener('unhandledrejection', (e) => {
+    if (!vrStartPending) return;
+    const r = e.reason;
+    vrStartPending = false;
+    showBottomHint('VR failed to start: ' + ((r && (r.name + ' — ' + r.message)) || String(r)), 10000);
+});
 let menuOpen = true;
 let hintTimer = null;
 
@@ -424,14 +432,15 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         });
     }
     const yes = (b) => (b ? 'yes' : 'no');
-    const vrDiag = 'Details — address: ' + location.protocol + '//' + location.host +
+    const vrDiag = 'Details — address: ' + location.href.split('?')[0] +
         ' · secure: ' + yes(window.isSecureContext) +
         ' · WebXR: ' + yes(!!navigator.xr) +
         ' · embedded: ' + yes(embedded) +
         ' · xr policy: ' + (policyAllows === null ? 'n/a' : yes(policyAllows)) +
         ' · headset browser: ' + yes(isHeadsetBrowser) +
         (xrError ? ' · error: ' + xrError : '') +
-        ' · result: ' + (vrSupported ? 'supported' : vrReason);
+        ' · result: ' + (vrSupported ? 'supported' : vrReason) +
+        ' · browser: ' + navigator.userAgent;
     console.info('[tour] ' + vrDiag + ' | UA: ' + navigator.userAgent);
     document.body.classList.toggle('vr-off', !vrSupported);
     const vrBtn = document.getElementById('VRButton') || document.getElementById('XRButton');
@@ -449,12 +458,25 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         new MutationObserver(tidy).observe(vrBtn, { childList: true, characterData: true, subtree: true });
         tidy();
         vrBtn.addEventListener('click', (e) => {
-            if (vrSupported) return;
+            if (vrSupported) {
+                // three.js gives no feedback if the headset refuses or never answers
+                vrStartPending = true;
+                showBottomHint('Starting VR — put the headset on…', 4000);
+                setTimeout(() => {
+                    if (vrStartPending && !renderer.xr.isPresenting) {
+                        showBottomHint('The headset did not start VR. Check Link is showing its home space in the headset, then try again.', 8000);
+                    }
+                    vrStartPending = false;
+                }, 6000);
+                return;
+            }
             e.preventDefault(); e.stopPropagation();
             // Embedded without VR permission: open the tour on its own, where VR is allowed
             if (vrReason === 'VR blocked by embed') {
-                const w = window.open(location.href, '_blank', 'noopener');
-                if (!w) showBottomHint('Pop-up blocked — open the tour address directly in a new tab for VR', 5000);
+                const a = document.createElement('a');
+                a.href = location.href; a.target = '_blank'; a.rel = 'noopener';
+                document.body.appendChild(a); a.click(); a.remove();
+                showBottomHint('If no tab opened, paste this into the address bar: ' + location.href, 8000);
                 return;
             }
             showBottomHint(vrReason === 'VR needs HTTPS'
@@ -687,6 +709,7 @@ function onWindowResize() {
 window.addEventListener('resize', onWindowResize);
 
 renderer.xr.addEventListener('sessionstart', () => {
+    vrStartPending = false;
     if (menuOpen) closeMenu();
     hideTouchHints();
     bottomHint.classList.remove('show');
