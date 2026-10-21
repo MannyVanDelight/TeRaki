@@ -2,7 +2,15 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { ApartmentReflections } from './reflections.js';
-import { prepareMaterials } from './materials.js';
+import { prepareMaterials, refinishInBox } from './materials.js';
+
+// Surfaces to re-finish inside a box (world metres). The fridge shares the kitchen's lacquer
+// mesh, but its baked texture is streaky — give it the laptop's brushed-metal treatment.
+const REFINISH = [
+    { label: 'fridge', fromSurface: 'lacquer', room: 'living',
+      box: [[-5.70, -0.02, -0.79], [-4.95, 1.99, -0.04]],
+      finish: { surface: 'metal', color: 0xe2e5e8, metalness: 1, roughness: 0.32, strength: 1.0, baked: 0.12 } },
+];
 
 // --- 1. CORE SETUP ---
 const scene = new THREE.Scene();
@@ -214,6 +222,10 @@ function processModel(gltf, isMain) {
     scene.add(gltf.scene);
     gltf.scene.updateMatrixWorld(true);
     prepareMaterials(gltf.scene, reflections, gltf.userData && gltf.userData.background);
+    for (const r of REFINISH) {
+        const n = refinishInBox(gltf.scene, r, reflections);
+        if (n) console.info('[tour] refinished ' + r.label + ': ' + n + ' triangles');
+    }
     if (isMain) { detectFloorHeight(gltf.scene); goHome(); }
 }
 
@@ -569,7 +581,8 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
         const tidy = () => {
             const txt = (vrBtn.textContent || '').toUpperCase();
             if (!vrSupported || txt.includes('NOT')) {
-                const label = vrReason === 'VR blocked by embed' ? 'Open in new tab for VR' : (vrReason || 'VR not detected');
+                const label = vrReason === 'VR blocked by embed' ? 'Open in new tab for VR'
+                    : vrReason === 'VR not detected' ? 'No headset found' : 'VR not available';
                 if (vrBtn.textContent !== label) vrBtn.textContent = label;
                 vrBtn.onclick = null; // VRButton otherwise navigates to an external WebXR page
                 vrBtn.style.cursor = vrReason === 'VR blocked by embed' ? 'pointer' : 'default';
@@ -590,12 +603,12 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
                 return;
             }
             showBottomHint(vrReason === 'VR needs HTTPS'
-                ? 'This page is on plain http:// — browsers only allow VR on https:// or localhost'
+                ? 'VR needs the secure (https) address of this tour'
                 : vrReason === 'Browser has no WebXR'
-                ? 'This browser has no WebXR — use Chrome, Edge or the Meta Quest Browser'
+                ? 'This browser can’t show VR — try Chrome, Edge or your headset’s browser'
                 : vrReason === 'VR blocked by embed'
                 ? 'The page embedding this tour blocks VR — open the tour on its own'
-                : 'No headset detected — start Link (or put the headset on) and the page will reload', 5000);
+                : 'No headset found — open the tour in your headset’s browser, or connect it with Quest Link', 5000);
         }, true);
     }
     const vrTab = document.getElementById('tab-vr');
@@ -605,20 +618,23 @@ document.getElementById('home-btn').addEventListener('click', (e) => {
     if (!vrSupported) {
         // Tab stays enabled so the reason below can actually be read
         vrStatus.textContent = vrReason === 'VR needs HTTPS'
-            ? 'VR is blocked because this page is served over plain http://. Browsers only allow WebXR on https:// addresses (or http://localhost on the same machine).'
+            ? 'VR isn’t available on this version of the page. Open the tour from its secure (https) address to use a headset.'
             : vrReason === 'Browser has no WebXR'
-            ? 'This browser does not support WebXR. Use Chrome or Edge on PC (with Link running), or the Meta Quest Browser in the headset.'
+            ? 'This browser can’t show VR. Use Chrome or Edge on a PC with a headset connected, or open the tour in your headset’s own browser.'
             : vrReason === 'VR blocked by embed'
-            ? 'This tour is embedded in another page that does not allow VR. Add allow="xr-spatial-tracking; fullscreen" to the <iframe> tag, or open the tour on its own.'
-            : 'No headset detected. On PC, start Link and make Meta Horizon Link the active OpenXR runtime — the page reloads by itself when the headset appears.';
+            ? 'VR can’t start inside this page. Use the button below to open the tour on its own — VR works there.'
+            : 'No headset found. Easiest: open this page in your headset’s own browser. On a PC, connect the headset with Quest Link first — this page notices it and reloads by itself.';
     } else {
         vrStatus.textContent = 'A headset was detected on this device — you are ready to go.';
     }
     // Always show the raw check results under the message, so problems can be pinned down
-    const diagEl = document.createElement('span');
-    diagEl.style.cssText = 'display:block;margin-top:8px;font-family:var(--mono);font-size:10.5px;line-height:1.5;word-break:break-word;';
-    diagEl.textContent = vrDiag;
-    vrStatus.appendChild(diagEl);
+    // Technical details only for troubleshooting: add ?debug to the address
+    if (new URLSearchParams(location.search).has('debug')) {
+        const diagEl = document.createElement('span');
+        diagEl.style.cssText = 'display:block;margin-top:8px;font-family:var(--mono);font-size:10.5px;line-height:1.5;word-break:break-word;';
+        diagEl.textContent = vrDiag;
+        vrStatus.appendChild(diagEl);
+    }
 
     if (vrSupported || isHeadsetBrowser) { if (badge) badge.textContent = vrSupported ? 'VR headset ready' : 'VR check'; setTab('vr'); }
     else if (inputMode === 'touch') { if (badge) badge.textContent = 'Touch controls'; setTab('touch'); }

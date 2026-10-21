@@ -47,11 +47,13 @@ export class ApartmentReflections {
                 shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
                     float facing = abs(dot(normalize(normal), normalize(vViewPosition)));
                     float fresnel = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
-                    float glassAlpha = clamp(fresnel + 0.015, 0.0, 1.0);
-                    gl_FragColor = vec4(outgoingLight / max(glassAlpha, 0.001), glassAlpha);`);
+                    float glassAlpha = clamp(fresnel + ${(material.userData.glassTint ?? 0.015).toFixed(3)}, 0.0, 1.0);
+                    vec3 glassLight = outgoingLight * ${(material.userData.glassReflection ?? 1).toFixed(3)};
+                    gl_FragColor = vec4(glassLight / max(glassAlpha, 0.001), glassAlpha);`);
             }
         };
-        material.customProgramCacheKey = () => 'apartment-probe-v1-' + Boolean(material.userData.windowGlass);
+        material.customProgramCacheKey = () => 'apartment-probe-v2-' + Boolean(material.userData.windowGlass) +
+            (material.userData.windowGlass ? '-' + material.userData.glassReflection + '-' + material.userData.glassTint : '');
     }
     async load() {
         const loader = new THREE.CubeTextureLoader();

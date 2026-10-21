@@ -14,6 +14,12 @@ const finishes = {
     mirror: { roughness: 0.055, metalness: 1, strength: 0.95, baked: 0.02 },
     glass: { roughness: 0.12, metalness: 0, strength: 0.65, baked: 0.93 },
 };
+// Window glass look — raise these to make the panes more visible
+export const GLASS = {
+    reflection: 3.6,   // multiplier on the room reflection seen in the glass (1 = physically subtle)
+    tint: 0.09,        // how much the glass dims the view through it (0 = invisible, 0.15 = clearly tinted)
+};
+
 const detailLoader = new THREE.TextureLoader();
 const floorNormal = detailLoader.load('./textures/floor-normal.jpg');
 const floorRoughness = detailLoader.load('./textures/floor-roughness.jpg');
@@ -40,6 +46,8 @@ export function prepareMaterials(root, reflections, background = false) {
                 glass.premultipliedAlpha = true;
                 glass.forceSinglePass = true;
                 glass.userData.windowGlass = true;
+                glass.userData.glassReflection = GLASS.reflection;
+                glass.userData.glassTint = GLASS.tint;
                 reflections.register(glass, source.userData.room, mesh);
                 return glass;
             }
@@ -73,4 +81,43 @@ export function prepareMaterials(root, reflections, background = false) {
         };
         mesh.material = Array.isArray(mesh.material) ? mesh.material.map(convert) : convert(mesh.material);
     });
+}
+
+// Re-finish only the triangles of a mesh that sit inside a world-space box (e.g. the fridge,
+// which shares one lacquer mesh with the kitchen cabinets). Adds a second material group.
+export function refinishInBox(root, { fromSurface, box, finish, room }, reflections) {
+    const area = new THREE.Box3(new THREE.Vector3(...box[0]), new THREE.Vector3(...box[1]));
+    const v = new THREE.Vector3(), c = new THREE.Vector3();
+    let total = 0;
+    root.traverse(mesh => {
+        if (!mesh.isMesh || Array.isArray(mesh.material) || !mesh.geometry.index) return;
+        if (mesh.material.userData.surface !== fromSurface) return;
+        if (!new THREE.Box3().setFromObject(mesh).intersectsBox(area)) return;
+        mesh.updateMatrixWorld(true);
+        const g = mesh.geometry, idx = g.index.array, pos = g.attributes.position;
+        const keep = [], move = [];
+        for (let i = 0; i < idx.length; i += 3) {
+            c.set(0, 0, 0);
+            for (let k = 0; k < 3; k++) c.add(v.fromBufferAttribute(pos, idx[i + k]).applyMatrix4(mesh.matrixWorld));
+            (area.containsPoint(c.multiplyScalar(1 / 3)) ? move : keep).push(idx[i], idx[i + 1], idx[i + 2]);
+        }
+        if (!move.length) return;
+        const order = new idx.constructor(idx.length);
+        order.set(keep); order.set(move, keep.length);
+        g.setIndex(new THREE.BufferAttribute(order, 1));
+        g.clearGroups(); g.addGroup(0, keep.length, 0); g.addGroup(keep.length, move.length, 1);
+
+        const src = mesh.material;
+        const m = new THREE.MeshStandardMaterial({
+            color: finish.color, emissive: 0xffffff, emissiveMap: src.emissiveMap,
+            emissiveIntensity: finish.baked, roughness: finish.roughness, metalness: finish.metalness,
+            envMapIntensity: finish.strength, side: src.side,
+        });
+        m.name = src.name + ' (refinished)';
+        m.userData.surface = finish.surface || 'metal';
+        reflections.register(m, room, mesh);
+        mesh.material = [src, m];
+        total += move.length / 3;
+    });
+    return total;
 }
