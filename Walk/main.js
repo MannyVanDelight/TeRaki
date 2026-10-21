@@ -125,7 +125,7 @@ function vrPathBlocked(c, target) {
     blockRay.ray.direction.normalize();
     blockRay.far = dist - 0.05;
     const hits = blockRay.intersectObjects(scene.children, true).filter(h =>
-        h.object.isMesh && h.object !== pingRing && !vrMarkers.includes(h.object) &&
+        h.object.isMesh && h.object !== pingRing && !vrMarkers.includes(h.object) && !h.object.userData.isVRUI &&
         h.object.visible && h.object.material && h.object.material.visible !== false);
     // Something solid in the way that isn't itself floor-like → blocked
     return hits.some(h => !h.face || h.face.normal.clone().transformDirection(h.object.matrixWorld).y < 0.6);
@@ -157,6 +157,7 @@ const controllers = [0, 1].map((i) => {
     c.userData.marker = m;
     c.userData.ray = ray;
     c.addEventListener('selectstart', () => {
+        if (c.userData.onExit) { exitVR(); return; }
         const p = c.userData.hitPoint;
         if (!p) return;
         if (vrPathBlocked(c, p)) {    // don't teleport through walls/furniture
@@ -170,6 +171,55 @@ const controllers = [0, 1].map((i) => {
 });
 
 let vrRecentreFrames = 0;
+
+// --- In-VR "Exit VR" button: floats low in front of you, works with controller trigger or hand pinch ---
+const VR_UI = { distance: 0.65, below: 0.40, width: 0.24, height: 0.075 };
+function makeButtonTexture(text, hover) {
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 160;
+    const g = cv.getContext('2d');
+    const r = 76;
+    g.beginPath(); g.moveTo(4 + r, 4); g.arcTo(508, 4, 508, 156, r); g.arcTo(508, 156, 4, 156, r);
+    g.arcTo(4, 156, 4, 4, r); g.arcTo(4, 4, 508, 4, r); g.closePath();
+    g.fillStyle = hover ? '#ffffff' : 'rgba(30,30,31,0.82)'; g.fill();
+    g.lineWidth = 6; g.strokeStyle = hover ? '#ffffff' : 'rgba(255,255,255,0.55)'; g.stroke();
+    g.fillStyle = hover ? '#1e1e1f' : '#ffffff';
+    g.font = '600 64px "Helvetica Neue", Helvetica, Arial, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, 256, 84);
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    return t;
+}
+const exitTex = { normal: makeButtonTexture('Exit VR', false), hover: makeButtonTexture('Exit VR', true) };
+const vrUI = new THREE.Group();
+vrUI.visible = false;
+const exitBtn = new THREE.Mesh(
+    new THREE.PlaneGeometry(VR_UI.width, VR_UI.height),
+    new THREE.MeshBasicMaterial({ map: exitTex.normal, transparent: true, depthTest: false, depthWrite: false, toneMapped: false })
+);
+exitBtn.renderOrder = 30;
+exitBtn.userData.isVRUI = true;
+vrUI.add(exitBtn);
+scene.add(vrUI);
+let vrUIYaw = null;
+const _uiHead = new THREE.Vector3(), _uiDir = new THREE.Vector3();
+function updateVRUI(dt) {
+    camera.getWorldPosition(_uiHead);
+    camera.getWorldDirection(_uiDir);
+    const yaw = Math.atan2(_uiDir.x, _uiDir.z);
+    if (vrUIYaw === null) vrUIYaw = yaw;
+    else {
+        // Lazy follow: stays put for small head turns, glides round when you turn away
+        const d = Math.atan2(Math.sin(yaw - vrUIYaw), Math.cos(yaw - vrUIYaw));
+        if (Math.abs(d) > 0.5) vrUIYaw += d * Math.min(1, dt * 3);
+    }
+    vrUI.position.set(_uiHead.x + Math.sin(vrUIYaw) * VR_UI.distance, _uiHead.y - VR_UI.below,
+                      _uiHead.z + Math.cos(vrUIYaw) * VR_UI.distance);
+    vrUI.lookAt(_uiHead);
+}
+function exitVR() {
+    const session = renderer.xr.getSession();
+    if (session) session.end();
+}
 function hideVRMarkers() { vrMarkers.forEach(m => { m.visible = false; }); }
 
 // Ping ring shown where a touch / click teleport lands
@@ -377,15 +427,27 @@ function animateFrame() {
 
         // Aim: a mesh named "floor" if the model has one, otherwise a flat plane at the
         // detected floor height (cheap — no per-frame raycast against the whole model)
+        updateVRUI(dt);
+        vrUI.updateMatrixWorld(true);
+        let exitHover = false;
         for (const c of controllers) {
             const m = c.userData.marker;
             c.userData.hitPoint = null;
+            c.userData.onExit = false;
             m.visible = false;
             if (!c.visible) continue;
 
             _m.extractRotation(c.matrixWorld);
             vrRaycaster.ray.origin.setFromMatrixPosition(c.matrixWorld);
             vrRaycaster.ray.direction.set(0, 0, -1).applyMatrix4(_m);
+
+            // The Exit VR button takes priority over teleporting
+            const uiHit = vrUI.visible ? vrRaycaster.intersectObject(exitBtn, false)[0] : null;
+            if (uiHit) {
+                c.userData.onExit = true; exitHover = true;
+                c.userData.ray.scale.z = uiHit.distance;
+                continue;
+            }
             let hit = null;
             if (floorMeshes.length) {
                 hit = vrRaycaster.intersectObjects(floorMeshes, false)[0] || null;
@@ -405,6 +467,8 @@ function animateFrame() {
             m.material.color.setHex(performance.now() < (c.userData.blockedUntil || 0) ? 0xff3b30 : 0x00ff00);
             m.visible = true;
         }
+        const wantTex = exitHover ? exitTex.hover : exitTex.normal;
+        if (exitBtn.material.map !== wantTex) { exitBtn.material.map = wantTex; exitBtn.material.needsUpdate = true; }
 
     } else {
         const speed = 1.5; // units per second
@@ -900,6 +964,8 @@ async function startVR() {
 vrButtonEl.addEventListener('click', startVR);
 
 renderer.xr.addEventListener('sessionstart', () => {
+    vrUI.visible = true;
+    vrUIYaw = null;
     // Live readout on the desktop screen while the headset is in VR
     xrFrames = 0;
     clearInterval(xrStatusTimer);
@@ -931,6 +997,7 @@ renderer.xr.addEventListener('sessionstart', () => {
 });
 
 renderer.xr.addEventListener('sessionend', () => {
+    vrUI.visible = false;
     clearInterval(xrStatusTimer);
     vrAttemptAt = 0;
     hideVRMarkers();
